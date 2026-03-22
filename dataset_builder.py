@@ -1,204 +1,120 @@
 """
-Dataset builder: loads raw data, computes features for all stocks,
-joins NIFTY context, and creates train/val/test splits.
+dataset_builder.py -- build daily feature dataset from 1m DuckDB data.
 """
 
-import pandas as pd
-import duckdb
-from typing import Dict, Tuple, Optional
+from __future__ import annotations
 
-from gp_system_complete.config import (
-    DB_PATH,
-    TRADABLE_STOCKS,
-    MARKET_CONTEXT,
-    TRAIN_END,
-    VAL_END,
-    FEATURE_TABLE,
-    FEATURE_PARQUET,
-    V1_GP_FEATURES,
-    OUTPUT_DIR,
+import pandas as pd
+import numpy as np
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+
+from utils import get_logger, print_banner, Timer
+from data_loader import load_symbol, validate_data
+from feature_engineering import build_daily_features
+from config import (
+    ALL_SYMBOLS, NIFTY_SYMBOL, DB_PATH, OUTPUT_DIR,
+    TRAIN_END, VAL_START, VAL_END, TEST_START,
+    DAILY_FEATURES,
 )
-from gp_system_complete.data_loader import load_symbol, load_all_symbols, validate_data
-from gp_system_complete.feature_engineering import (
-    compute_nifty_features,
-    build_features_for_stock,
-)
-from gp_system_complete.utils import get_logger, ensure_output_dirs, Timer, print_banner
+
+log = get_logger()
 
 
 def build_full_feature_dataset(
-    db_path: str = DB_PATH,
-    symbols: Optional[list] = None,
-    save_parquet: bool = True,
-    save_duckdb: bool = True,
+    symbols: Optional[List[str]] = None,
+    db_path: Optional[Path] = None,
 ) -> pd.DataFrame:
-    """
-    Build the complete feature dataset for all tradable stocks.
-
-    Steps:
-    1. Load NIFTY data → compute NIFTY features
-    2. For each tradable stock → compute all features
-    3. Concatenate into one DataFrame
-    4. Save to parquet and/or DuckDB
-
-    Returns the combined DataFrame.
-    """
-    log = get_logger()
-    ensure_output_dirs()
-
     if symbols is None:
-        symbols = TRADABLE_STOCKS
+        symbols = list(ALL_SYMBOLS)
+    if db_path is None:
+        db_path = DB_PATH
 
-    print_banner("BUILDING FEATURE DATASET")
+    print_banner("BUILDING DAILY FEATURE DATASET")
 
-    # Step 1: Load and process NIFTY
-    with Timer("NIFTY feature computation"):
-        nifty_df = load_symbol(MARKET_CONTEXT, db_path)
-        if nifty_df.empty:
-            raise ValueError("No NIFTY data found in database")
-        validate_data(nifty_df, MARKET_CONTEXT)
-        nifty_features = compute_nifty_features(nifty_df)
-        log.info(f"NIFTY features: {len(nifty_features):,} rows, "
-                 f"{len(nifty_features.columns)} columns")
+    log.info("Loading NIFTY (market index)...")
+    try:
+        nifty_1m = load_symbol(NIFTY_SYMBOL, db_path)
+        validate_data(nifty_1m, NIFTY_SYMBOL)
+    except Exception as e:
+        log.warning(f"Could not load NIFTY: {e} -- market features will be zero")
+        nifty_1m = None
 
-    # Step 2: Process each tradable stock
-    all_frames = []
+    all_dfs = []
+
     for sym in symbols:
-        with Timer(f"{sym} feature computation"):
-            stock_df = load_symbol(sym, db_path)
-            if stock_df.empty:
-                log.warning(f"Skipping {sym}: no data")
-                continue
-            validate_data(stock_df, sym)
-            feat_df = build_features_for_stock(stock_df, nifty_features, sym)
-            all_frames.append(feat_df)
+        log.info(f"Processing {sym}...")
+        try:
+            with Timer(f"{sym} feature computation"):
+                raw = load_symbol(sym, db_path)
+                validate_data(raw, sym)
+                feat_df = build_daily_features(raw, nifty_1m, sym)
+                all_dfs.append(feat_df)
+        except Exception as e:
+            log.error(f"Failed to process {sym}: {e}")
+            continue
 
-    if not all_frames:
-        raise ValueError("No stock data processed")
+    if not all_dfs:
+        raise RuntimeError("No data loaded for any symbol.")
 
-    # Step 3: Concatenate
-    combined = pd.concat(all_frames, axis=0).sort_index()
-    log.info(f"Combined dataset: {len(combined):,} rows, {len(combined.columns)} columns")
+    df = pd.concat(all_dfs, axis=0).sort_index()
 
-    # Show per-symbol summary
-    for sym in combined["symbol"].unique():
-        mask = combined["symbol"] == sym
-        n = mask.sum()
-        log.info(f"  {sym}: {n:,} rows")
+    log.info(f"Combined daily dataset: {len(df):,} rows, {len(df.columns)} columns")
+    log.info(f"  Symbols : {sorted(df['symbol'].unique())}")
+    log.info(f"  Date range: {df.index.min().date()} to {df.index.max().date()}")
 
-    # Step 4: Save
-    if save_parquet:
-        combined.to_parquet(str(FEATURE_PARQUET), index=True)
-        log.info(f"Saved parquet → {FEATURE_PARQUET}")
-
-    if save_duckdb:
-        _save_to_duckdb(combined, db_path)
-
-    return combined
-
-
-def _save_to_duckdb(df: pd.DataFrame, db_path: str) -> None:
-    """Save the feature DataFrame to DuckDB."""
-    log = get_logger()
-    # Reset index so 'ts' becomes a column
-    df_save = df.reset_index()
-    df_save = df_save.rename(columns={df_save.columns[0]: "ts"})
-
-    con = duckdb.connect(db_path)
-    con.execute(f"DROP TABLE IF EXISTS {FEATURE_TABLE}")
-    con.execute(f"CREATE TABLE {FEATURE_TABLE} AS SELECT * FROM df_save")
-    count = con.execute(f"SELECT COUNT(*) FROM {FEATURE_TABLE}").fetchone()[0]
-    con.close()
-    log.info(f"Saved DuckDB table '{FEATURE_TABLE}': {count:,} rows")
-
-
-def load_feature_dataset(
-    db_path: str = DB_PATH,
-    from_parquet: bool = True,
-) -> pd.DataFrame:
-    """
-    Load the precomputed feature dataset.
-    """
-    log = get_logger()
-
-    if from_parquet and FEATURE_PARQUET.exists():
-        log.info(f"Loading features from {FEATURE_PARQUET}")
-        df = pd.read_parquet(str(FEATURE_PARQUET))
-        log.info(f"Loaded {len(df):,} rows, {len(df.columns)} columns")
-        return df
-
-    # Fallback to DuckDB
-    log.info(f"Loading features from DuckDB table '{FEATURE_TABLE}'")
-    con = duckdb.connect(db_path, read_only=True)
-    df = con.execute(f"SELECT * FROM {FEATURE_TABLE} ORDER BY ts, symbol").df()
-    con.close()
-
-    df["ts"] = pd.to_datetime(df["ts"], utc=True)
-    df = df.set_index("ts")
-    log.info(f"Loaded {len(df):,} rows, {len(df.columns)} columns")
     return df
 
 
-def split_by_time(
-    df: pd.DataFrame,
-    train_end: str = TRAIN_END,
-    val_end: str = VAL_END,
-) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """
-    Split feature dataset into train/validation/test by date.
+def split_dataset(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    train = df[df.index <  TRAIN_END].copy()
+    val   = df[(df.index >= VAL_START) & (df.index < VAL_END)].copy()
+    test  = df[df.index >= TEST_START].copy()
 
-    Train: everything up to train_end
-    Validation: train_end < ts <= val_end
-    Test: everything after val_end
-    """
-    log = get_logger()
-
-    # Handle timezone-aware index
-    idx = df.index
-    if hasattr(idx, "tz") and idx.tz is not None:
-        train_end_ts = pd.Timestamp(train_end, tz=idx.tz)
-        val_end_ts = pd.Timestamp(val_end, tz=idx.tz)
-    else:
-        train_end_ts = pd.Timestamp(train_end)
-        val_end_ts = pd.Timestamp(val_end)
-
-    train = df[df.index <= train_end_ts].copy()
-    val = df[(df.index > train_end_ts) & (df.index <= val_end_ts)].copy()
-    test = df[df.index > val_end_ts].copy()
-
-    log.info(f"Time-based split:")
-    for name, split_df in [("Train", train), ("Val", val), ("Test", test)]:
-        if len(split_df) > 0:
-            symbols = split_df["symbol"].nunique()
-            log.info(
-                f"  {name:5s}: {len(split_df):>10,} rows, "
-                f"{symbols} symbols, "
-                f"{split_df.index[0].date()} → {split_df.index[-1].date()}"
-            )
-        else:
-            log.warning(f"  {name:5s}: EMPTY")
+    log.info(f"Train: {len(train):,} rows  ({train.index.min().date()} to {train.index.max().date()})")
+    log.info(f"Val  : {len(val):,} rows  ({val.index.min().date()} to {val.index.max().date()})")
+    log.info(f"Test : {len(test):,} rows  ({test.index.min().date()} to {test.index.max().date()})")
 
     return train, val, test
 
 
-def get_stock_data(
+def prepare_stock_data(
     df: pd.DataFrame,
-    symbol: str,
-    feature_cols: Optional[list] = None,
-) -> pd.DataFrame:
-    """
-    Extract data for a single stock from the combined dataset.
-    """
-    if feature_cols is None:
-        feature_cols = V1_GP_FEATURES
+    symbols: Optional[List[str]] = None,
+) -> Dict[str, Tuple[np.ndarray, np.ndarray]]:
+    if symbols is None:
+        symbols = list(ALL_SYMBOLS)
 
-    mask = df["symbol"] == symbol
-    stock_df = df.loc[mask].copy()
+    result = {}
+    for sym in symbols:
+        sym_df = df[df["symbol"] == sym].sort_index()
+        if len(sym_df) < 50:
+            log.warning(f"  {sym}: only {len(sym_df)} rows -- skipping")
+            continue
+        features = sym_df[DAILY_FEATURES].values.astype(np.float64)
+        prices   = sym_df["close"].values.astype(np.float64)
+        features = np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
+        result[sym] = (features, prices)
+        log.info(f"  {sym}: {len(sym_df)} daily bars ready")
 
-    # Verify all required feature columns exist
-    missing = [c for c in feature_cols if c not in stock_df.columns]
-    if missing:
-        log = get_logger()
-        log.warning(f"{symbol}: missing features: {missing}")
+    return result
 
-    return stock_df
+
+def save_features(df: pd.DataFrame, path: Optional[Path] = None) -> Path:
+    if path is None:
+        path = OUTPUT_DIR / "gp_features_daily.parquet"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_parquet(str(path))
+    size_mb = path.stat().st_size / 1e6
+    log.info(f"[SAVE] Features saved to {path}  ({size_mb:.1f} MB)")
+    return path
+
+
+def load_features(path: Optional[Path] = None) -> pd.DataFrame:
+    if path is None:
+        path = OUTPUT_DIR / "gp_features_daily.parquet"
+    if not path.exists():
+        raise FileNotFoundError(f"Feature file not found: {path}")
+    df = pd.read_parquet(str(path))
+    log.info(f"[DATA] Loaded {len(df):,} rows from {path}")
+    return df

@@ -1,184 +1,122 @@
 """
-Configuration for Unified Multi-Stock GP Trading System.
+config.py -- all configuration for the GP positional trading system.
 
-All tuneable constants, file paths, feature lists, and GP parameters
-live here so every other module imports from one place.
+TRADING RULES:
+- Long/Short positional trading
+- Entry  : signal crosses zero (pos -> long, neg -> short)
+- Exit   : signal crosses back through zero
+- Size   : signal-strength based, max 30% per stock, min 5%
+- Stocks : all 6 simultaneously
+- Hold   : 3 days minimum, 60 days maximum
 """
 
-from dataclasses import dataclass, field
-from typing import List
 from pathlib import Path
+import numpy as np
 
-# ═══════════════════════════════════════════════════════════════════
+# ============================================================================
 # PATHS
-# ═══════════════════════════════════════════════════════════════════
-DB_PATH = "gp_research.duckdb"
-OUTPUT_DIR = Path("gp_output")
-FEATURE_TABLE = "gp_features_1m"
-FEATURE_PARQUET = OUTPUT_DIR / "gp_features_1m.parquet"
+# ============================================================================
+BASE_DIR   = Path(__file__).parent
+DB_PATH    = BASE_DIR / "gp_research.duckdb"
+OUTPUT_DIR = BASE_DIR / "gp_output"
 
-# ═══════════════════════════════════════════════════════════════════
-# SYMBOLS
-# ═══════════════════════════════════════════════════════════════════
-TRADABLE_STOCKS = ["ICICIBANK", "HDFCBANK", "RELIANCE", "INFY", "TCS", "WIPRO"]
-MARKET_CONTEXT = "NIFTY"
-ALL_SYMBOLS = TRADABLE_STOCKS + [MARKET_CONTEXT]
+# ============================================================================
+# UNIVERSE
+# ============================================================================
+ALL_SYMBOLS    = ["ICICIBANK", "HDFCBANK", "RELIANCE", "INFY", "TCS", "WIPRO"]
+NIFTY_SYMBOL   = "NIFTY"
+BARS_PER_DAY   = 375   # 1-minute bars per trading day
 
-# ═══════════════════════════════════════════════════════════════════
-# MARKET SESSION
-# ═══════════════════════════════════════════════════════════════════
-BARS_PER_DAY = 375
-MARKET_OPEN_HOUR = 9
-MARKET_OPEN_MIN = 15
-MARKET_CLOSE_HOUR = 15
-MARKET_CLOSE_MIN = 30
-SESSION_MINUTES = 375  # 9:15 to 15:30
+# ============================================================================
+# TIME SPLITS
+# ============================================================================
+TRAIN_START = "2021-08-16"
+TRAIN_END   = "2023-12-31"
+VAL_START   = "2024-01-01"
+VAL_END     = "2024-12-31"
+TEST_START  = "2025-01-01"
 
-# ═══════════════════════════════════════════════════════════════════
-# FEATURE ENGINEERING PARAMETERS
-# ═══════════════════════════════════════════════════════════════════
-RETURN_PERIODS = [1, 5, 15, 30, 60]
-SMA_PERIODS_BARS = {
-    "sma20": 20 * BARS_PER_DAY,
-    "sma50": 50 * BARS_PER_DAY,
-    "sma100": 100 * BARS_PER_DAY,
-    "sma200": 200 * BARS_PER_DAY,
-}
-ATR_PERIOD_BARS = 14 * BARS_PER_DAY
-VOLATILITY_PERIOD = 20 * BARS_PER_DAY
-VOLUME_REL_PERIODS = [5, 20]
-RANGE_PCT_PERIODS = [5, 20]
-TREND_50D_BARS = 50 * BARS_PER_DAY
-TREND_20D_BARS = 20 * BARS_PER_DAY
-
-FORWARD_RETURN_PERIODS = [5, 15, 30, 60]
-
-# ═══════════════════════════════════════════════════════════════════
-# V1 FEATURE SET — compact GP terminal inputs
-# ═══════════════════════════════════════════════════════════════════
-V1_STOCK_FEATURES = [
-    "ret_5m",
-    "ret_15m",
-    "ret_30m",
-    "ret_60m",
+# ============================================================================
+# DAILY FEATURE LIST  (GP terminals)
+# ============================================================================
+DAILY_FEATURES = [
+    # Price returns
+    "ret_1d",
+    "ret_5d",
+    "ret_10d",
+    "ret_20d",
+    # Trend
+    "close_vs_sma10",
     "close_vs_sma20",
     "close_vs_sma50",
-    "close_vs_sma100",
     "close_vs_sma200",
-    "atr_pct",
+    # Momentum
+    "rsi_14",
+    "macd_signal",
+    "macd_hist",
+    # Volatility
+    "atr_pct_14",
+    "bb_pct",
+    # Volume
     "volume_rel_20",
-]
-
-V1_MARKET_FEATURES = [
-    "nifty_ret_5m",
-    "nifty_ret_15m",
-    "nifty_ret_60m",
-    "nifty_close_vs_sma200",
-]
-
-V1_RELATIVE_STRENGTH = [
-    "rs_15m",
-    "rs_60m",
+    # Market (Nifty)
+    "nifty_ret_5d",
+    "nifty_ret_20d",
+    "nifty_vs_sma50",
+    # Relative strength vs Nifty
+    "rs_5d",
     "rs_20d",
 ]
 
-V1_TIME_FEATURES = [
-    "minutes_from_open_norm",
-]
+N_FEATURES = len(DAILY_FEATURES)
 
-V1_GP_FEATURES = (
-    V1_STOCK_FEATURES
-    + V1_MARKET_FEATURES
-    + V1_RELATIVE_STRENGTH
-    + V1_TIME_FEATURES
-)
+# ============================================================================
+# POSITIONAL TRADING RULES
+# ============================================================================
+MIN_HOLD_DAYS   = 3
+MAX_HOLD_DAYS   = 60
+ENTRY_THRESHOLD = 0.0
+EXIT_THRESHOLD  = 0.0
 
-# ═══════════════════════════════════════════════════════════════════
-# TRAIN / VAL / TEST SPLIT
-# ═══════════════════════════════════════════════════════════════════
-TRAIN_END = "2023-12-31"
-VAL_END = "2024-12-31"
-# Everything after VAL_END is test
+# Position sizing
+MAX_POSITION_WEIGHT = 0.30
+MIN_POSITION_WEIGHT = 0.05
+TOTAL_CAPITAL       = 1_000_000.0
 
-# ═══════════════════════════════════════════════════════════════════
-# REGIME EVALUATION THRESHOLDS
-# ═══════════════════════════════════════════════════════════════════
-REGIME_BULL_THRESHOLD = 0.05   # trend_50d_return > +5%
-REGIME_BEAR_THRESHOLD = -0.05  # trend_50d_return < -5%
+# Transaction costs
+COMMISSION_PCT  = 0.0003
+SLIPPAGE_PCT    = 0.0002
+TOTAL_COST_PCT  = COMMISSION_PCT + SLIPPAGE_PCT
 
-# ═══════════════════════════════════════════════════════════════════
-# BACKTESTER
-# ═══════════════════════════════════════════════════════════════════
-STARTING_CASH = 1_000_000
-COMMISSION_RATE = 0.0003   # 3 bps round-trip
-SLIPPAGE_PCT = 0.0001      # 1 bp slippage
-ENTRY_THRESHOLD = 0.7
-EXIT_THRESHOLD = -0.7
+# ============================================================================
+# GP PARAMETERS
+# ============================================================================
+GP_POPULATION    = 2000
+GP_GENERATIONS   = 50
+GP_CROSSOVER     = 0.7
+GP_MUTATION      = 0.2
+GP_ELITE         = 10
+GP_TOURNAMENT    = 5
+GP_MIN_DEPTH     = 2
+GP_MAX_DEPTH     = 6
+GP_MAX_NODES     = 40
+GP_EARLY_STOP    = 10
+GP_CHUNK_SIZE    = 200
+GP_WORKERS       = 8
 
+# ============================================================================
+# FITNESS WEIGHTS
+# ============================================================================
+W_ANNUAL_RETURN   = 3.0
+W_SHARPE          = 2.0
+W_SORTINO         = 1.0
+W_WIN_RATE        = 1.0
+W_MAX_DRAWDOWN    = 2.0
+W_TRADE_COUNT     = 0.5
+W_CONSISTENCY     = 1.5
+COMPLEXITY_PENALTY = 0.1
 
-# ═══════════════════════════════════════════════════════════════════
-# GP CONFIGURATION
-# ═══════════════════════════════════════════════════════════════════
-@dataclass
-class GPConfig:
-    """All GP evolution hyperparameters."""
-    # Population
-    pop_size: int = 5000
-    n_generations: int = 50
-    tournament_size: int = 5
-    crossover_prob: float = 0.7
-    mutation_prob: float = 0.2
-    elite_size: int = 10
+MIN_TRADES_TOTAL     = 10
+MIN_TRADES_PER_STOCK = 2
 
-    # Tree constraints
-    max_tree_depth: int = 8
-    max_tree_nodes: int = 50
-    min_tree_depth: int = 2
-    init_min_depth: int = 2
-    init_max_depth: int = 5
-
-    # Fitness
-    min_trades: int = 1
-    max_trades_per_day: float = 20.0
-    max_drawdown_pct: float = 50.0
-    complexity_penalty_weight: float = 0.05
-
-    # Multi-stock aggregation
-    lambda_robustness: float = 0.5
-
-    # Fitness weights
-    w_sharpe: float = 1.0
-    w_sortino: float = 0.5
-    w_annual_return: float = 0.3
-    w_max_drawdown: float = 0.5
-    w_trades_per_day: float = 0.1
-    w_low_trades: float = 0.5
-    w_trade_bonus: float = 0.2
-
-    # Misc
-    random_seed: int = 42
-    n_workers: int = -1  # -1 = all CPUs
-    chunk_size: int = 200
-    checkpoint_every: int = 5  # save every N generations
-
-    # Files
-    checkpoint_file: str = str(OUTPUT_DIR / "checkpoint.pkl")
-    best_model_file: str = str(OUTPUT_DIR / "best_model.pkl")
-    stats_file: str = str(OUTPUT_DIR / "evolution_stats.csv")
-    log_file: str = str(OUTPUT_DIR / "training.log")
-
-    # Backtest
-    starting_cash: float = float(STARTING_CASH)
-    commission: float = COMMISSION_RATE
-    slippage: float = SLIPPAGE_PCT
-    entry_threshold: float = ENTRY_THRESHOLD
-    exit_threshold: float = EXIT_THRESHOLD
-
-
-DEFAULT_GP_CONFIG = GPConfig()
-
-
-# ═══════════════════════════════════════════════════════════════════
-# NUMERIC SAFETY
-# ═══════════════════════════════════════════════════════════════════
-EPSILON = 1e-10
+EPSILON = 1e-8

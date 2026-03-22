@@ -1,317 +1,141 @@
 """
-Feature engineering for GP trading system.
-
-Computes normalized technical features from 1-minute OHLCV bars.
-All features are ratios / returns / z-scores — no raw price levels.
+feature_engineering.py -- compute DAILY features from 1-minute OHLCV data.
 """
+
+from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-from typing import Dict
+from typing import Optional
 
-from gp_system_complete.config import (
-    BARS_PER_DAY,
-    RETURN_PERIODS,
-    SMA_PERIODS_BARS,
-    ATR_PERIOD_BARS,
-    VOLATILITY_PERIOD,
-    VOLUME_REL_PERIODS,
-    RANGE_PCT_PERIODS,
-    TREND_50D_BARS,
-    TREND_20D_BARS,
-    FORWARD_RETURN_PERIODS,
-    MARKET_OPEN_HOUR,
-    MARKET_OPEN_MIN,
-    SESSION_MINUTES,
-    EPSILON,
-)
-from gp_system_complete.utils import get_logger
+from utils import get_logger
+from config import DAILY_FEATURES
+
+log = get_logger()
 
 
-# ═══════════════════════════════════════════════════════════════════
-# RETURN FEATURES
-# ═══════════════════════════════════════════════════════════════════
-def compute_returns(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Compute lagged return features.
-    ret_n = close / close.shift(n) - 1
-    """
-    close = df["close"]
-    out = pd.DataFrame(index=df.index)
-    for n in RETURN_PERIODS:
-        out[f"ret_{n}m"] = close / close.shift(n) - 1
-    return out
+def resample_to_daily(df: pd.DataFrame) -> pd.DataFrame:
+    daily = df.resample("1D").agg({
+        "open":   "first",
+        "high":   "max",
+        "low":    "min",
+        "close":  "last",
+        "volume": "sum",
+    }).dropna(subset=["close"])
+
+    daily = daily[daily["volume"] > 0].copy()
+    return daily
 
 
-# ═══════════════════════════════════════════════════════════════════
-# TREND / POSITION FEATURES
-# ═══════════════════════════════════════════════════════════════════
-def compute_trend_features(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Compute trend-position features using SMAs.
-    All expressed as ratios (normalized).
-    """
-    close = df["close"]
-    out = pd.DataFrame(index=df.index)
-
-    smas = {}
-    for name, period in SMA_PERIODS_BARS.items():
-        smas[name] = close.rolling(window=period, min_periods=max(period // 2, 1)).mean()
-
-    # close vs SMA ratios
-    out["close_vs_sma20"] = close / smas["sma20"].replace(0, np.nan) - 1
-    out["close_vs_sma50"] = close / smas["sma50"].replace(0, np.nan) - 1
-    out["close_vs_sma100"] = close / smas["sma100"].replace(0, np.nan) - 1
-    out["close_vs_sma200"] = close / smas["sma200"].replace(0, np.nan) - 1
-
-    # SMA cross ratios
-    out["sma20_vs_sma50"] = smas["sma20"] / smas["sma50"].replace(0, np.nan) - 1
-    out["sma50_vs_sma200"] = smas["sma50"] / smas["sma200"].replace(0, np.nan) - 1
-
-    # 50-day trend return (uses daily close proxy: last bar each day)
-    out["trend_50d_return"] = close / close.shift(TREND_50D_BARS) - 1
-
-    return out
+def _sma(s: pd.Series, n: int) -> pd.Series:
+    return s.rolling(n, min_periods=n).mean()
 
 
-# ═══════════════════════════════════════════════════════════════════
-# VOLATILITY FEATURES
-# ═══════════════════════════════════════════════════════════════════
-def compute_volatility_features(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Compute volatility features: ATR%, range%, realized vol.
-    """
-    high = df["high"]
-    low = df["low"]
-    close = df["close"]
-    prev_close = close.shift(1)
-    out = pd.DataFrame(index=df.index)
-
-    # True Range
-    tr1 = high - low
-    tr2 = (high - prev_close).abs()
-    tr3 = (low - prev_close).abs()
-    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-
-    # ATR as percentage of close
-    atr = tr.rolling(window=ATR_PERIOD_BARS, min_periods=max(ATR_PERIOD_BARS // 2, 1)).mean()
-    out["atr_pct"] = atr / close.replace(0, np.nan)
-
-    # Range percentage
-    for p in RANGE_PCT_PERIODS:
-        period_bars = p * BARS_PER_DAY
-        rolling_high = high.rolling(window=period_bars, min_periods=max(period_bars // 2, 1)).max()
-        rolling_low = low.rolling(window=period_bars, min_periods=max(period_bars // 2, 1)).min()
-        out[f"range_pct_{p}"] = (rolling_high - rolling_low) / close.replace(0, np.nan)
-
-    # Realized volatility (std of 1m returns over N days)
-    ret_1m = close.pct_change()
-    out["volatility_20"] = ret_1m.rolling(
-        window=VOLATILITY_PERIOD, min_periods=max(VOLATILITY_PERIOD // 2, 1)
-    ).std() * np.sqrt(BARS_PER_DAY)  # annualize roughly
-
-    return out
+def _ema(s: pd.Series, n: int) -> pd.Series:
+    return s.ewm(span=n, adjust=False).mean()
 
 
-# ═══════════════════════════════════════════════════════════════════
-# VOLUME FEATURES
-# ═══════════════════════════════════════════════════════════════════
-def compute_volume_features(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Compute relative volume features.
-    """
-    volume = df["volume"].astype(float)
-    out = pd.DataFrame(index=df.index)
-
-    for p in VOLUME_REL_PERIODS:
-        period_bars = p * BARS_PER_DAY
-        mean_vol = volume.rolling(
-            window=period_bars, min_periods=max(period_bars // 2, 1)
-        ).mean()
-        out[f"volume_rel_{p}"] = volume / mean_vol.replace(0, np.nan)
-
-    return out
+def _rsi(s: pd.Series, n: int = 14) -> pd.Series:
+    delta = s.diff()
+    gain  = delta.clip(lower=0).rolling(n).mean()
+    loss  = (-delta.clip(upper=0)).rolling(n).mean()
+    rs    = gain / (loss + 1e-8)
+    return 100 - (100 / (1 + rs))
 
 
-# ═══════════════════════════════════════════════════════════════════
-# SESSION / TIME FEATURES
-# ═══════════════════════════════════════════════════════════════════
-def compute_time_features(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Compute session/time features from the timestamp index.
-    """
-    idx = df.index
-    out = pd.DataFrame(index=idx)
-
-    # Convert to IST if UTC
-    if hasattr(idx, "tz") and idx.tz is not None:
-        ist_idx = idx.tz_convert("Asia/Kolkata")
-    else:
-        ist_idx = idx
-
-    # Minutes from market open
-    minutes_from_open = (
-        (ist_idx.hour - MARKET_OPEN_HOUR) * 60
-        + (ist_idx.minute - MARKET_OPEN_MIN)
-    )
-    out["minutes_from_open_norm"] = minutes_from_open / SESSION_MINUTES
-    out["minutes_to_close_norm"] = 1.0 - out["minutes_from_open_norm"]
-
-    # Day of week (0=Monday, 4=Friday) normalized to [0, 1]
-    out["day_of_week"] = ist_idx.dayofweek / 4.0
-
-    # Opening/closing phase flags (first/last 15 minutes)
-    out["is_opening_phase"] = (minutes_from_open <= 15).astype(float)
-    out["is_closing_phase"] = (minutes_from_open >= SESSION_MINUTES - 15).astype(float)
-
-    return out
+def _atr(high: pd.Series, low: pd.Series, close: pd.Series, n: int = 14) -> pd.Series:
+    tr = pd.concat([
+        high - low,
+        (high - close.shift(1)).abs(),
+        (low  - close.shift(1)).abs(),
+    ], axis=1).max(axis=1)
+    return tr.rolling(n, min_periods=n).mean()
 
 
-# ═══════════════════════════════════════════════════════════════════
-# FORWARD RETURNS (for diagnostics)
-# ═══════════════════════════════════════════════════════════════════
-def compute_forward_returns(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Compute forward returns for evaluation / diagnostics.
-    """
-    close = df["close"]
-    out = pd.DataFrame(index=df.index)
-    for n in FORWARD_RETURN_PERIODS:
-        out[f"fwd_ret_{n}m"] = close.shift(-n) / close - 1
-    return out
+def _macd(s: pd.Series, fast=12, slow=26, signal=9):
+    ema_fast    = _ema(s, fast)
+    ema_slow    = _ema(s, slow)
+    macd_line   = ema_fast - ema_slow
+    signal_line = _ema(macd_line, signal)
+    histogram   = macd_line - signal_line
+    return macd_line, signal_line, histogram
 
 
-# ═══════════════════════════════════════════════════════════════════
-# NIFTY CONTEXT FEATURES
-# ═══════════════════════════════════════════════════════════════════
-def compute_nifty_features(nifty_df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Compute NIFTY context features (same logic as stock, prefixed).
-    """
-    close = nifty_df["close"]
-    out = pd.DataFrame(index=nifty_df.index)
+def _bollinger_pct(s: pd.Series, n: int = 20) -> pd.Series:
+    sma   = _sma(s, n)
+    std   = s.rolling(n).std()
+    upper = sma + 2 * std
+    lower = sma - 2 * std
+    return (s - lower) / (upper - lower + 1e-8)
+
+
+def compute_daily_features(
+    daily: pd.DataFrame,
+    nifty_daily: Optional[pd.DataFrame] = None,
+    symbol: str = "",
+) -> pd.DataFrame:
+    df = daily.copy()
+    c  = df["close"]
+    h  = df["high"]
+    l  = df["low"]
+    v  = df["volume"]
 
     # Returns
-    for n in [1, 5, 15, 60]:
-        out[f"nifty_ret_{n}m"] = close / close.shift(n) - 1
+    df["ret_1d"]  = c.pct_change(1)
+    df["ret_5d"]  = c.pct_change(5)
+    df["ret_10d"] = c.pct_change(10)
+    df["ret_20d"] = c.pct_change(20)
 
     # Trend
-    sma50 = close.rolling(
-        window=SMA_PERIODS_BARS["sma50"],
-        min_periods=max(SMA_PERIODS_BARS["sma50"] // 2, 1),
-    ).mean()
-    sma200 = close.rolling(
-        window=SMA_PERIODS_BARS["sma200"],
-        min_periods=max(SMA_PERIODS_BARS["sma200"] // 2, 1),
-    ).mean()
+    df["close_vs_sma10"]  = c / _sma(c, 10)  - 1
+    df["close_vs_sma20"]  = c / _sma(c, 20)  - 1
+    df["close_vs_sma50"]  = c / _sma(c, 50)  - 1
+    df["close_vs_sma200"] = c / _sma(c, 200) - 1
 
-    out["nifty_close_vs_sma50"] = close / sma50.replace(0, np.nan) - 1
-    out["nifty_close_vs_sma200"] = close / sma200.replace(0, np.nan) - 1
+    # Momentum
+    df["rsi_14"] = _rsi(c, 14) / 100.0
+    _, sig, hist = _macd(c)
+    df["macd_signal"] = sig  / (c + 1e-8)
+    df["macd_hist"]   = hist / (c + 1e-8)
 
-    # Market return 20d
-    out["market_return_20d"] = close / close.shift(TREND_20D_BARS) - 1
+    # Volatility
+    df["atr_pct_14"] = _atr(h, l, c, 14) / (c + 1e-8)
+    df["bb_pct"]     = _bollinger_pct(c, 20)
 
-    return out
+    # Volume
+    vol_sma = _sma(v.astype(float), 20)
+    df["volume_rel_20"] = v / (vol_sma + 1e-8)
+
+    # Nifty / Relative strength
+    if nifty_daily is not None:
+        nc = nifty_daily["close"].reindex(df.index, method="ffill")
+        df["nifty_ret_5d"]   = nc.pct_change(5)
+        df["nifty_ret_20d"]  = nc.pct_change(20)
+        df["nifty_vs_sma50"] = nc / _sma(nc, 50) - 1
+        df["rs_5d"]  = df["ret_5d"]  - nc.pct_change(5)
+        df["rs_20d"] = df["ret_20d"] - nc.pct_change(20)
+    else:
+        for col in ["nifty_ret_5d","nifty_ret_20d","nifty_vs_sma50","rs_5d","rs_20d"]:
+            df[col] = 0.0
+
+    n_before = len(df)
+    df = df.dropna(subset=DAILY_FEATURES)
+    n_after  = len(df)
+
+    if symbol:
+        log.info(f"  {symbol}: {n_after} daily bars (dropped {n_before - n_after} NaN rows)")
+
+    return df
 
 
-# ═══════════════════════════════════════════════════════════════════
-# RELATIVE STRENGTH
-# ═══════════════════════════════════════════════════════════════════
-def compute_relative_strength(
-    stock_df: pd.DataFrame,
-    nifty_features: pd.DataFrame,
-    stock_returns: pd.DataFrame,
+def build_daily_features(
+    df_1m: pd.DataFrame,
+    nifty_1m: Optional[pd.DataFrame] = None,
+    symbol: str = "",
 ) -> pd.DataFrame:
-    """
-    Compute stock vs NIFTY relative strength features.
-    """
-    out = pd.DataFrame(index=stock_df.index)
+    daily = resample_to_daily(df_1m)
+    nifty_daily = resample_to_daily(nifty_1m) if nifty_1m is not None else None
 
-    # Align NIFTY features to stock index
-    nifty_aligned = nifty_features.reindex(stock_df.index, method="ffill")
-
-    # Short-term RS
-    if "ret_5m" in stock_returns.columns and "nifty_ret_5m" in nifty_aligned.columns:
-        out["rs_5m"] = stock_returns["ret_5m"] - nifty_aligned["nifty_ret_5m"]
-    if "ret_15m" in stock_returns.columns and "nifty_ret_15m" in nifty_aligned.columns:
-        out["rs_15m"] = stock_returns["ret_15m"] - nifty_aligned["nifty_ret_15m"]
-    if "ret_60m" in stock_returns.columns and "nifty_ret_60m" in nifty_aligned.columns:
-        out["rs_60m"] = stock_returns["ret_60m"] - nifty_aligned["nifty_ret_60m"]
-
-    # 20-day RS
-    stock_close = stock_df["close"]
-    stock_20d = stock_close / stock_close.shift(TREND_20D_BARS) - 1
-    nifty_20d = nifty_aligned.get("market_return_20d", pd.Series(0, index=stock_df.index))
-    out["rs_20d"] = stock_20d - nifty_20d
-
-    return out
-
-
-# ═══════════════════════════════════════════════════════════════════
-# MASTER: BUILD ALL FEATURES FOR ONE STOCK
-# ═══════════════════════════════════════════════════════════════════
-def build_features_for_stock(
-    stock_df: pd.DataFrame,
-    nifty_features: pd.DataFrame,
-    symbol: str,
-) -> pd.DataFrame:
-    """
-    Build the complete feature set for a single stock.
-
-    Parameters
-    ----------
-    stock_df : DataFrame with OHLCV for one stock (ts index)
-    nifty_features : DataFrame of precomputed NIFTY features (ts index)
-    symbol : stock symbol string
-
-    Returns
-    -------
-    DataFrame with OHLCV + all features + forward returns + symbol column
-    """
-    log = get_logger()
-    log.info(f"Computing features for {symbol}...")
-
-    # Stock features
-    returns = compute_returns(stock_df)
-    trend = compute_trend_features(stock_df)
-    vol = compute_volatility_features(stock_df)
-    volume = compute_volume_features(stock_df)
-    time_feat = compute_time_features(stock_df)
-    fwd = compute_forward_returns(stock_df)
-
-    # Relative strength
-    rs = compute_relative_strength(stock_df, nifty_features, returns)
-
-    # Align NIFTY features
-    nifty_aligned = nifty_features.reindex(stock_df.index, method="ffill")
-
-    # Combine everything
-    result = pd.concat(
-        [
-            stock_df,           # raw OHLCV
-            returns,            # ret_1m, ret_5m, ...
-            trend,              # close_vs_sma20, ...
-            vol,                # atr_pct, range_pct_5, ...
-            volume,             # volume_rel_5, ...
-            nifty_aligned,      # nifty_ret_5m, ...
-            rs,                 # rs_5m, rs_15m, ...
-            time_feat,          # minutes_from_open_norm, ...
-            fwd,                # fwd_ret_5m, ...
-        ],
-        axis=1,
-    )
-
-    result["symbol"] = symbol
-
-    # Drop rows with NaN in critical features (due to warm-up)
-    initial_rows = len(result)
-    critical_cols = [c for c in result.columns if c not in ["symbol"] and not c.startswith("fwd_")]
-    result = result.dropna(subset=critical_cols)
-    dropped = initial_rows - len(result)
-
-    log.info(
-        f"  {symbol}: {len(result):,} rows after warm-up "
-        f"(dropped {dropped:,} NaN rows)"
-    )
-
-    return result
+    feat_df = compute_daily_features(daily, nifty_daily, symbol)
+    feat_df["symbol"] = symbol
+    return feat_df

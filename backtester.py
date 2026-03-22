@@ -1,423 +1,253 @@
 """
-Backtester — per-stock backtest engine using vectorised simulation.
-
-Spec Section 10: Backtesting
-- Long-only strategy (simplification: position ∈ {0, 1})
-- Signal > entry_threshold → go long
-- Signal < exit_threshold → go flat
-- Commission + slippage applied
-- Returns a dict of performance metrics
-
-Note: This is a lightweight vectorised backtester — no dependency on
-backtesting.py library. Operates on 1-minute bars with pre-computed
-GP signals.
+backtester.py -- positional long/short backtester.
 """
 
-import math
+from __future__ import annotations
+
 import numpy as np
-import pandas as pd
-from typing import Dict, Optional, Tuple
 from dataclasses import dataclass
+from typing import List, Dict, Tuple
 
-from .config import GPConfig, DEFAULT_GP_CONFIG, EPSILON, BARS_PER_DAY
-from .gp_primitives import normalise_signal
+from config import (
+    MIN_HOLD_DAYS, MAX_HOLD_DAYS,
+    TOTAL_COST_PCT, EPSILON,
+)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# BACKTEST RESULT
-# ═══════════════════════════════════════════════════════════════════════════
+@dataclass
+class Trade:
+    symbol:       str
+    direction:    int
+    entry_day:    int
+    exit_day:     int
+    entry_price:  float
+    exit_price:   float
+    weight:       float
+    hold_days:    int
+    gross_return: float
+    net_return:   float
+    signal_entry: float
+
 
 @dataclass
 class BacktestResult:
-    """Container for backtest performance metrics."""
-    total_return_pct: float = 0.0
-    annual_return_pct: float = 0.0
-    sharpe_ratio: float = 0.0
-    sortino_ratio: float = 0.0
-    max_drawdown_pct: float = 0.0
-    n_trades: int = 0
-    win_rate_pct: float = 0.0
-    profit_factor: float = 0.0
-    avg_trade_return_pct: float = 0.0
-    trades_per_day: float = 0.0
-    exposure_pct: float = 0.0
-    n_bars: int = 0
-    n_days: float = 0.0
-
-    def to_dict(self) -> Dict:
-        return {
-            "total_return_pct": round(self.total_return_pct, 4),
-            "annual_return_pct": round(self.annual_return_pct, 4),
-            "sharpe_ratio": round(self.sharpe_ratio, 4),
-            "sortino_ratio": round(self.sortino_ratio, 4),
-            "max_drawdown_pct": round(self.max_drawdown_pct, 4),
-            "n_trades": self.n_trades,
-            "win_rate_pct": round(self.win_rate_pct, 2),
-            "profit_factor": round(self.profit_factor, 4),
-            "avg_trade_return_pct": round(self.avg_trade_return_pct, 4),
-            "trades_per_day": round(self.trades_per_day, 4),
-            "exposure_pct": round(self.exposure_pct, 2),
-            "n_bars": self.n_bars,
-            "n_days": round(self.n_days, 2),
-        }
-
-    def is_valid(self, cfg: GPConfig = None) -> bool:
-        """Check if this result passes basic quality filters."""
-        if cfg is None:
-            cfg = DEFAULT_GP_CONFIG
-        if self.n_trades < cfg.min_trades:
-            return False
-        if self.max_drawdown_pct < -cfg.max_drawdown_pct:
-            return False
-        if self.trades_per_day > cfg.max_trades_per_day:
-            return False
-        return True
+    symbol:            str
+    trades:            List[Trade]
+    equity_curve:      np.ndarray
+    total_return_pct:  float
+    annual_return_pct: float
+    sharpe_ratio:      float
+    sortino_ratio:     float
+    max_drawdown_pct:  float
+    win_rate:          float
+    avg_hold_days:     float
+    trades_per_year:   float
+    n_trades:          int
+    profit_factor:     float
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# GENERATE SIGNALS
-# ═══════════════════════════════════════════════════════════════════════════
+def generate_signal(func, feature_matrix: np.ndarray) -> np.ndarray:
+    n = feature_matrix.shape[0]
+    signal = np.zeros(n)
 
-def generate_signals(
-    func,
-    feature_matrix: np.ndarray,
-) -> np.ndarray:
-    """
-    Apply compiled GP function to feature matrix → normalised signals.
-
-    Parameters
-    ----------
-    func : callable
-        Compiled GP function taking N float args.
-    feature_matrix : np.ndarray
-        Shape (n_bars, n_features).
-
-    Returns
-    -------
-    signals : np.ndarray
-        Shape (n_bars,), values in [-1, 1].
-    """
-    n_bars = feature_matrix.shape[0]
-    signals = np.zeros(n_bars, dtype=np.float64)
-
-    for i in range(n_bars):
+    for i in range(n):
+        row = feature_matrix[i]
         try:
-            row = feature_matrix[i]
-            raw = float(func(*row))
-            signals[i] = normalise_signal(raw)
+            val = func(*row)
+            signal[i] = float(val) if np.isfinite(val) else 0.0
         except Exception:
-            signals[i] = 0.0
+            signal[i] = 0.0
 
-    return signals
-
-
-def generate_signals_vectorised(
-    func,
-    feature_matrix: np.ndarray,
-    batch_size: int = 10000,
-) -> np.ndarray:
-    """
-    Vectorised signal generation with error handling in batches.
-    Falls back to row-by-row for any batch that fails.
-    """
-    n_bars = feature_matrix.shape[0]
-    signals = np.zeros(n_bars, dtype=np.float64)
-
-    for start in range(0, n_bars, batch_size):
-        end = min(start + batch_size, n_bars)
-        batch = feature_matrix[start:end]
-
-        try:
-            # Try vectorised evaluation
-            raw_signals = np.array([
-                float(func(*batch[j])) for j in range(len(batch))
-            ])
-            # Apply tanh normalisation
-            safe_raw = np.where(
-                np.isfinite(raw_signals), raw_signals, 0.0
-            )
-            signals[start:end] = np.tanh(safe_raw)
-        except Exception:
-            # Fallback to row-by-row
-            for j in range(len(batch)):
-                try:
-                    raw = float(func(*batch[j]))
-                    signals[start + j] = normalise_signal(raw)
-                except Exception:
-                    signals[start + j] = 0.0
-
-    return signals
+    return signal
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# VECTORISED BACKTEST ENGINE
-# ═══════════════════════════════════════════════════════════════════════════
-
-def run_backtest(
-    signals: np.ndarray,
-    close_prices: np.ndarray,
-    cfg: GPConfig = None,
+def backtest_single_stock(
+    signal: np.ndarray,
+    prices: np.ndarray,
+    symbol: str = "",
+    min_hold: int = MIN_HOLD_DAYS,
+    max_hold: int = MAX_HOLD_DAYS,
+    cost_pct: float = TOTAL_COST_PCT,
 ) -> BacktestResult:
-    """
-    Run a vectorised backtest on pre-computed signals.
+    n      = len(signal)
+    trades = []
 
-    Strategy Logic (long-only):
-    - Signal > entry_threshold → position = 1 (long)
-    - Signal < exit_threshold → position = 0 (flat)
-    - Otherwise → hold current position
+    in_trade    = False
+    direction   = 0
+    entry_day   = 0
+    entry_price = 0.0
+    entry_sig   = 0.0
 
-    Parameters
-    ----------
-    signals : np.ndarray
-        Normalised signals in [-1, 1], shape (n_bars,).
-    close_prices : np.ndarray
-        Close prices, shape (n_bars,).
-    cfg : GPConfig
-        Configuration with thresholds, costs etc.
+    for i in range(1, n):
+        prev_sig = signal[i - 1]
+        curr_sig = signal[i]
+        price    = prices[i]
+        hold     = i - entry_day
 
-    Returns
-    -------
-    BacktestResult
-        Performance metrics.
-    """
-    if cfg is None:
-        cfg = DEFAULT_GP_CONFIG
-
-    n_bars = len(signals)
-    if n_bars < 2:
-        return BacktestResult(n_bars=n_bars)
-
-    entry_thresh = cfg.entry_threshold
-    exit_thresh = cfg.exit_threshold
-    commission = cfg.commission
-    slippage = cfg.slippage
-
-    # ── Compute positions ──────────────────────────────────────────────
-    positions = np.zeros(n_bars, dtype=np.int8)  # 0=flat, 1=long
-
-    for i in range(1, n_bars):
-        if signals[i] > entry_thresh:
-            positions[i] = 1
-        elif signals[i] < exit_thresh:
-            positions[i] = 0
+        if not in_trade:
+            if prev_sig <= 0 and curr_sig > 0:
+                in_trade    = True
+                direction   = 1
+                entry_day   = i
+                entry_price = price * (1 + cost_pct)
+                entry_sig   = curr_sig
+            elif prev_sig >= 0 and curr_sig < 0:
+                in_trade    = True
+                direction   = -1
+                entry_day   = i
+                entry_price = price * (1 - cost_pct)
+                entry_sig   = curr_sig
         else:
-            positions[i] = positions[i - 1]  # hold
+            exit_signal = False
+            if hold >= min_hold:
+                if direction == 1 and curr_sig <= 0:
+                    exit_signal = True
+                elif direction == -1 and curr_sig >= 0:
+                    exit_signal = True
 
-    # ── Compute returns ────────────────────────────────────────────────
-    price_returns = np.zeros(n_bars, dtype=np.float64)
-    price_returns[1:] = (close_prices[1:] - close_prices[:-1]) / (
-        close_prices[:-1] + EPSILON
-    )
+            if hold >= max_hold:
+                exit_signal = True
 
-    # Strategy returns = position[i-1] * return[i] (use previous bar's position)
-    strategy_returns = np.zeros(n_bars, dtype=np.float64)
-    strategy_returns[1:] = positions[:-1] * price_returns[1:]
+            if exit_signal:
+                if direction == 1:
+                    exit_price   = price * (1 - cost_pct)
+                    gross_return = (exit_price / entry_price) - 1
+                else:
+                    exit_price   = price * (1 + cost_pct)
+                    gross_return = (entry_price / exit_price) - 1
 
-    # ── Apply transaction costs ────────────────────────────────────────
-    position_changes = np.diff(positions, prepend=0)
-    trades_mask = position_changes != 0
-    n_trades_raw = int(np.sum(trades_mask))
+                trades.append(Trade(
+                    symbol       = symbol,
+                    direction    = direction,
+                    entry_day    = entry_day,
+                    exit_day     = i,
+                    entry_price  = entry_price,
+                    exit_price   = exit_price,
+                    weight       = 1.0,
+                    hold_days    = hold,
+                    gross_return = gross_return,
+                    net_return   = gross_return,
+                    signal_entry = entry_sig,
+                ))
+                in_trade = False
 
-    # Each trade costs commission + slippage
-    cost_per_trade = commission + slippage
-    trade_costs = np.zeros(n_bars, dtype=np.float64)
-    trade_costs[trades_mask] = cost_per_trade
-    strategy_returns -= trade_costs
+    if in_trade and len(prices) > 0:
+        i     = n - 1
+        price = prices[i]
+        hold  = i - entry_day
 
-    # ── Equity curve ───────────────────────────────────────────────────
-    equity = np.cumprod(1.0 + strategy_returns)
-
-    # ── Metrics ────────────────────────────────────────────────────────
-    total_return_pct = (equity[-1] - 1.0) * 100.0
-
-    # Trading days
-    n_days = n_bars / BARS_PER_DAY
-    n_years = n_days / 252.0
-
-    # Annualised return
-    if n_years > 0 and equity[-1] > 0:
-        annual_return_pct = (
-            (equity[-1] ** (1.0 / max(n_years, 0.01))) - 1.0
-        ) * 100.0
-    else:
-        annual_return_pct = 0.0
-
-    # Sharpe ratio (annualised, per-bar)
-    bars_per_year = BARS_PER_DAY * 252
-    if len(strategy_returns) > 1:
-        mean_ret = np.mean(strategy_returns)
-        std_ret = np.std(strategy_returns)
-        if std_ret > EPSILON:
-            sharpe_ratio = (mean_ret / std_ret) * math.sqrt(bars_per_year)
+        if direction == 1:
+            exit_price   = price * (1 - cost_pct)
+            gross_return = (exit_price / entry_price) - 1
         else:
-            sharpe_ratio = 0.0
-    else:
-        sharpe_ratio = 0.0
+            exit_price   = price * (1 + cost_pct)
+            gross_return = (entry_price / exit_price) - 1
 
-    # Sortino ratio (annualised, per-bar)
-    downside_returns = strategy_returns[strategy_returns < 0]
-    if len(downside_returns) > 1:
-        downside_std = np.std(downside_returns)
-        if downside_std > EPSILON:
-            mean_ret = np.mean(strategy_returns)
-            sortino_ratio = (mean_ret / downside_std) * math.sqrt(bars_per_year)
-        else:
-            sortino_ratio = 0.0
-    else:
-        sortino_ratio = 0.0
+        trades.append(Trade(
+            symbol       = symbol,
+            direction    = direction,
+            entry_day    = entry_day,
+            exit_day     = i,
+            entry_price  = entry_price,
+            exit_price   = exit_price,
+            weight       = 1.0,
+            hold_days    = hold,
+            gross_return = gross_return,
+            net_return   = gross_return,
+            signal_entry = entry_sig,
+        ))
 
-    # Max drawdown
-    running_max = np.maximum.accumulate(equity)
-    drawdowns = (equity - running_max) / (running_max + EPSILON)
-    max_drawdown_pct = float(np.min(drawdowns)) * 100.0  # negative number
+    return _compute_metrics(trades, prices, symbol)
 
-    # Trade-level analysis
-    n_trades = n_trades_raw // 2  # entry+exit = 1 round trip
-    n_trades = max(n_trades, n_trades_raw - 1)  # at least count transitions
 
-    # Win rate from trade segments
-    trade_returns = _compute_trade_returns(positions, price_returns)
-    if len(trade_returns) > 0:
-        n_trades = len(trade_returns)
-        wins = sum(1 for r in trade_returns if r > 0)
-        win_rate_pct = (wins / n_trades) * 100.0
+def _compute_metrics(
+    trades: List[Trade],
+    prices: np.ndarray,
+    symbol: str,
+) -> BacktestResult:
+    n_days = len(prices)
 
-        gross_profit = sum(r for r in trade_returns if r > 0)
-        gross_loss = abs(sum(r for r in trade_returns if r < 0))
-        profit_factor = (
-            gross_profit / max(gross_loss, EPSILON)
+    if not trades:
+        return BacktestResult(
+            symbol=symbol, trades=[],
+            equity_curve=np.ones(n_days),
+            total_return_pct=0.0, annual_return_pct=0.0,
+            sharpe_ratio=0.0, sortino_ratio=0.0,
+            max_drawdown_pct=0.0, win_rate=0.0,
+            avg_hold_days=0.0, trades_per_year=0.0,
+            n_trades=0, profit_factor=0.0,
         )
-        avg_trade_return_pct = np.mean(trade_returns) * 100.0
+
+    equity = np.ones(n_days)
+    for t in trades:
+        for day in range(t.exit_day, n_days):
+            equity[day] *= (1 + t.net_return)
+
+    daily_ret = np.diff(equity) / (equity[:-1] + EPSILON)
+
+    n_trades      = len(trades)
+    returns       = np.array([t.net_return for t in trades])
+    hold_days     = np.array([t.hold_days  for t in trades])
+    wins          = returns > 0
+    win_rate      = wins.mean() if n_trades else 0.0
+    avg_hold      = hold_days.mean() if n_trades else 0.0
+    years         = n_days / 252.0
+    trades_per_yr = n_trades / max(years, EPSILON)
+
+    total_ret  = equity[-1] - 1.0
+    annual_ret = (equity[-1] ** (1.0 / max(years, EPSILON))) - 1.0
+
+    if len(daily_ret) > 1 and daily_ret.std() > EPSILON:
+        sharpe = (daily_ret.mean() / daily_ret.std()) * np.sqrt(252)
     else:
-        win_rate_pct = 0.0
-        profit_factor = 0.0
-        avg_trade_return_pct = 0.0
+        sharpe = 0.0
 
-    # Trades per day
-    trades_per_day = n_trades / max(n_days, 1.0)
+    downside = daily_ret[daily_ret < 0]
+    if len(downside) > 1 and downside.std() > EPSILON:
+        sortino = (daily_ret.mean() / downside.std()) * np.sqrt(252)
+    else:
+        sortino = 0.0
 
-    # Exposure
-    exposure_pct = (np.sum(positions) / max(n_bars, 1)) * 100.0
+    peak = np.maximum.accumulate(equity)
+    dd   = (equity - peak) / (peak + EPSILON)
+    max_dd = dd.min() * 100.0
+
+    gross_wins   = returns[wins].sum() if wins.any() else 0.0
+    gross_losses = -returns[~wins].sum() if (~wins).any() else EPSILON
+    profit_factor = gross_wins / max(gross_losses, EPSILON)
 
     return BacktestResult(
-        total_return_pct=total_return_pct,
-        annual_return_pct=annual_return_pct,
-        sharpe_ratio=sharpe_ratio,
-        sortino_ratio=sortino_ratio,
-        max_drawdown_pct=max_drawdown_pct,
-        n_trades=n_trades,
-        win_rate_pct=win_rate_pct,
-        profit_factor=profit_factor,
-        avg_trade_return_pct=avg_trade_return_pct,
-        trades_per_day=trades_per_day,
-        exposure_pct=exposure_pct,
-        n_bars=n_bars,
-        n_days=n_days,
+        symbol            = symbol,
+        trades            = trades,
+        equity_curve      = equity,
+        total_return_pct  = total_ret * 100.0,
+        annual_return_pct = annual_ret * 100.0,
+        sharpe_ratio      = sharpe,
+        sortino_ratio     = sortino,
+        max_drawdown_pct  = max_dd,
+        win_rate          = win_rate * 100.0,
+        avg_hold_days     = avg_hold,
+        trades_per_year   = trades_per_yr,
+        n_trades          = n_trades,
+        profit_factor     = profit_factor,
     )
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# TRADE-LEVEL RETURN ANALYSIS
-# ═══════════════════════════════════════════════════════════════════════════
-
-def _compute_trade_returns(
-    positions: np.ndarray,
-    price_returns: np.ndarray,
-) -> list:
-    """
-    Compute per-trade cumulative returns.
-
-    A trade starts when position goes from 0→1 and ends when 1→0.
-    Returns a list of cumulative returns for each completed trade.
-    """
-    trade_returns = []
-    in_trade = False
-    cum_return = 0.0
-
-    for i in range(1, len(positions)):
-        if not in_trade and positions[i] == 1 and positions[i - 1] == 0:
-            # Trade entry
-            in_trade = True
-            cum_return = 0.0
-
-        if in_trade:
-            cum_return += price_returns[i]
-
-        if in_trade and positions[i] == 0 and positions[i - 1] == 1:
-            # Trade exit
-            trade_returns.append(cum_return)
-            in_trade = False
-            cum_return = 0.0
-
-    # Close any open trade at end
-    if in_trade:
-        trade_returns.append(cum_return)
-
-    return trade_returns
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# FULL BACKTEST FOR ONE STOCK (convenience function)
-# ═══════════════════════════════════════════════════════════════════════════
-
-def backtest_stock(
-    func,
-    feature_matrix: np.ndarray,
-    close_prices: np.ndarray,
-    cfg: GPConfig = None,
-) -> BacktestResult:
-    """
-    End-to-end backtest: generate signals → run backtest.
-
-    Parameters
-    ----------
-    func : callable
-        Compiled GP function.
-    feature_matrix : np.ndarray
-        Shape (n_bars, n_features).
-    close_prices : np.ndarray
-        Shape (n_bars,).
-    cfg : GPConfig
-        Configuration.
-
-    Returns
-    -------
-    BacktestResult
-    """
-    signals = generate_signals_vectorised(func, feature_matrix)
-    return run_backtest(signals, close_prices, cfg)
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# MULTI-STOCK BACKTEST
-# ═══════════════════════════════════════════════════════════════════════════
-
-def backtest_multi_stock(
+def backtest_portfolio(
     func,
     stock_data: Dict[str, Tuple[np.ndarray, np.ndarray]],
-    cfg: GPConfig = None,
+    min_hold: int = MIN_HOLD_DAYS,
+    max_hold: int = MAX_HOLD_DAYS,
+    cost_pct: float = TOTAL_COST_PCT,
 ) -> Dict[str, BacktestResult]:
-    """
-    Run backtest across multiple stocks.
-
-    Parameters
-    ----------
-    func : callable
-        Compiled GP function.
-    stock_data : dict
-        {symbol: (feature_matrix, close_prices)}
-    cfg : GPConfig
-        Configuration.
-
-    Returns
-    -------
-    dict
-        {symbol: BacktestResult}
-    """
     results = {}
+
     for symbol, (features, prices) in stock_data.items():
         try:
-            results[symbol] = backtest_stock(func, features, prices, cfg)
-        except Exception as exc:
-            results[symbol] = BacktestResult()  # Empty/failed result
+            signal = generate_signal(func, features)
+            result = backtest_single_stock(signal, prices, symbol, min_hold, max_hold, cost_pct)
+            results[symbol] = result
+        except Exception:
+            pass
+
     return results
