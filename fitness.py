@@ -58,7 +58,7 @@ def portfolio_fitness(results: Dict[str, BacktestResult], tree_size: int) -> flo
     scores = list(per_stock.values())
 
     valid = [s for s in scores if s > -50.0]
-    if len(valid) < 2:
+    if len(valid) < 3:
         return -50.0 + len(valid) * 5.0
 
     mean_fit = np.mean(valid)
@@ -122,13 +122,17 @@ def evaluate_individual(
             return (BASE_FAIL,)
 
         if train_fit > EPSILON:
-            consistency = val_fit / (train_fit + EPSILON)
-            if consistency < 0.3:
-                overfit_penalty = 0.3
-            elif consistency < 0.6:
-                overfit_penalty = 0.7
+            if val_fit <= 0:
+                # Loses money on validation -- strong overfitting signal
+                overfit_penalty = 0.1
             else:
-                overfit_penalty = 1.0
+                consistency = val_fit / (train_fit + EPSILON)
+                if consistency < 0.3:
+                    overfit_penalty = 0.2
+                elif consistency < 0.6:
+                    overfit_penalty = 0.6
+                else:
+                    overfit_penalty = 1.0
         else:
             overfit_penalty = 0.5
 

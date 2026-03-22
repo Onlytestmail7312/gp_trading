@@ -266,10 +266,17 @@ def _compute_metrics(
             n_trades=0, profit_factor=0.0,
         )
 
-    equity = np.ones(n_days)
+    # Build correct equity curve using daily PnL
+    daily_pnl = np.zeros(n_days)
     for t in trades:
-        for day in range(t.exit_day, n_days):
-            equity[day] *= (1 + t.net_return)
+        if t.exit_day < n_days:
+            daily_pnl[t.exit_day] += t.net_return
+
+    # Cumulative compounding from daily PnL
+    equity = np.ones(n_days)
+    equity[0] = 1.0
+    for i in range(1, n_days):
+        equity[i] = equity[i-1] * (1 + daily_pnl[i])
 
     daily_ret = np.diff(equity) / (equity[:-1] + EPSILON)
 
