@@ -1,0 +1,4 @@
+gp_output/
+gp_research.duckdb
+__pycache__/
+gpfull/
