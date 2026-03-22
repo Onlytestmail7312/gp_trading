@@ -1,5 +1,5 @@
 """
-Evaluation — per-stock reporting and summary tables.
+Evaluation [?] per-stock reporting and summary tables.
 
 Spec Section 15: Evaluation Pipeline
 - Evaluate best individual on train / val / test splits per stock
@@ -13,23 +13,23 @@ import numpy as np
 import pandas as pd
 from typing import Dict, List, Optional, Tuple
 
-from .config import (
+from config import (
     GPConfig, DEFAULT_GP_CONFIG, V1_GP_FEATURES,
     TRADABLE_STOCKS, OUTPUT_DIR,
 )
-from .backtester import (
+from backtester import (
     BacktestResult, backtest_stock, generate_signals_vectorised, run_backtest,
 )
-from .fitness import prepare_eval_data, prepare_multi_stock_eval_data, composite_fitness
-from .gp_primitives import normalise_signal
-from .utils import get_logger, print_banner, print_table
+from fitness import prepare_eval_data, prepare_multi_stock_eval_data, composite_fitness
+from gp_primitives import normalise_signal
+from utils import get_logger, print_banner, print_table
 
 logger = get_logger("evaluation")
 
 
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 # EVALUATE ON ALL SPLITS & STOCKS
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 
 def evaluate_best_individual(
     func,
@@ -76,15 +76,15 @@ def evaluate_best_individual(
                 result = backtest_stock(func, features, prices, cfg)
                 results[symbol][split_name] = result
             except Exception as exc:
-                logger.warning(f"  ⚠️ {symbol}/{split_name}: {exc}")
+                logger.warning(f"  [WARN][?] {symbol}/{split_name}: {exc}")
                 results[symbol][split_name] = BacktestResult()
 
     return results
 
 
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 # FORMATTED RESULT TABLES
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 
 def print_evaluation_results(
     results: Dict[str, Dict[str, BacktestResult]],
@@ -95,7 +95,7 @@ def print_evaluation_results(
     """
     print_banner("EVALUATION RESULTS")
 
-    # ── Per-stock summary ──────────────────────────────────────────────
+    # -- Per-stock summary ----------------------------------------------
     headers = [
         "Symbol", "Split", "Return%", "Ann.Ret%", "Sharpe",
         "Sortino", "MaxDD%", "Trades", "WinRate%", "Trd/Day",
@@ -122,10 +122,10 @@ def print_evaluation_results(
 
     print_table(headers, rows)
 
-    # ── Aggregated summary ─────────────────────────────────────────────
-    print("\n" + "─" * 70)
+    # -- Aggregated summary ---------------------------------------------
+    print("\n" + "-" * 70)
     print("  AGGREGATED ACROSS STOCKS:")
-    print("─" * 70)
+    print("-" * 70)
 
     for split in ["train", "val", "test"]:
         returns = []
@@ -145,20 +145,20 @@ def print_evaluation_results(
                 f"n_stocks={len(returns)}"
             )
 
-    # ── Tree info ──────────────────────────────────────────────────────
+    # -- Tree info ------------------------------------------------------
     if individual is not None:
-        print(f"\n  🌳 Tree size: {len(individual)} nodes")
+        print(f"\n  [?] Tree size: {len(individual)} nodes")
         tree_str = str(individual)
         if len(tree_str) > 200:
             tree_str = tree_str[:200] + "..."
-        print(f"  📝 Formula: {tree_str}")
+        print(f"  [?] Formula: {tree_str}")
 
-    print("═" * 70)
+    print("=" * 70)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 # SAVE RESULTS TO CSV
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 
 def save_evaluation_results(
     results: Dict[str, Dict[str, BacktestResult]],
@@ -190,12 +190,12 @@ def save_evaluation_results(
         writer.writeheader()
         writer.writerows(rows)
 
-    logger.info(f"  📊 Results saved: {filepath}")
+    logger.info(f"  [?] Results saved: {filepath}")
 
 
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 # QUICK SUMMARY
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 
 def quick_summary(
     results: Dict[str, Dict[str, BacktestResult]],

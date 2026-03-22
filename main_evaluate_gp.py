@@ -1,5 +1,14 @@
+import sys, os
+os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 """
-Main Evaluation Script — evaluate a saved GP model on all data.
+Main Evaluation Script [?] evaluate a saved GP model on all data.
 
 Usage:
     python -m gp_system_complete.main_evaluate_gp [--model PATH]
@@ -20,26 +29,26 @@ from datetime import datetime
 
 import pandas as pd
 
-from .config import (
+from config import (
     GPConfig, DEFAULT_GP_CONFIG, V1_GP_FEATURES,
     TRADABLE_STOCKS, OUTPUT_DIR,
 )
-from .dataset_builder import load_feature_dataset, split_by_time
-from .gp_individual import setup_gp_toolbox, compile_individual
-from .gp_engine import load_best_model
-from .evaluation import (
+from dataset_builder import load_feature_dataset, split_by_time
+from gp_individual import setup_gp_toolbox, compile_individual
+from gp_engine import load_best_model
+from evaluation import (
     evaluate_best_individual,
     print_evaluation_results,
     save_evaluation_results,
     quick_summary,
 )
-from .regime_analysis import (
+from regime_analysis import (
     run_regime_analysis,
     save_regime_results,
     print_regime_distribution,
     add_regime_column,
 )
-from .utils import get_logger, print_banner, ensure_output_dirs, Timer
+from utils import get_logger, print_banner, ensure_output_dirs, Timer
 
 logger = get_logger("main_evaluate")
 
@@ -61,14 +70,14 @@ def main(model_path: str = None, cfg: GPConfig = None):
     feature_names = list(V1_GP_FEATURES)
     toolbox, pset = setup_gp_toolbox(cfg, feature_names)
 
-    # ══════════════════════════════════════════════════════════════════
+    # ==================================================================
     # STEP 1: Load saved model
-    # ══════════════════════════════════════════════════════════════════
-    logger.info("\n📦 Loading saved model...")
+    # ==================================================================
+    logger.info("\n[?] Loading saved model...")
 
     saved = load_best_model(model_path)
     if saved is None:
-        logger.error(f"❌ Could not load model from: {model_path}")
+        logger.error(f"[FAIL] Could not load model from: {model_path}")
         sys.exit(1)
 
     individual = saved["individual"]
@@ -81,25 +90,25 @@ def main(model_path: str = None, cfg: GPConfig = None):
         tree_str = tree_str[:300] + "..."
     logger.info(f"  Formula: {tree_str}")
 
-    # ══════════════════════════════════════════════════════════════════
+    # ==================================================================
     # STEP 2: Load features
-    # ══════════════════════════════════════════════════════════════════
-    logger.info("\n📂 Loading feature dataset...")
+    # ==================================================================
+    logger.info("\n[?] Loading feature dataset...")
 
     with Timer("Load features"):
         df = load_feature_dataset()
 
     if df is None or df.empty:
-        logger.error("❌ No feature data found. Run main_build_features.py first.")
+        logger.error("[FAIL] No feature data found. Run main_build_features.py first.")
         sys.exit(1)
 
     logger.info(f"  Loaded {len(df):,} rows")
     logger.info(f"  Symbols: {sorted(df['symbol'].unique())}")
 
-    # ══════════════════════════════════════════════════════════════════
+    # ==================================================================
     # STEP 3: Split by time
-    # ══════════════════════════════════════════════════════════════════
-    logger.info("\n📅 Splitting by time...")
+    # ==================================================================
+    logger.info("\n[?] Splitting by time...")
 
     train_df, val_df, test_df = split_by_time(df)
 
@@ -107,10 +116,10 @@ def main(model_path: str = None, cfg: GPConfig = None):
     logger.info(f"  Val:   {len(val_df):>10,} rows")
     logger.info(f"  Test:  {len(test_df):>10,} rows")
 
-    # ══════════════════════════════════════════════════════════════════
+    # ==================================================================
     # STEP 4: Setup toolbox and compile
-    # ══════════════════════════════════════════════════════════════════
-    logger.info("\n🔧 Compiling GP tree...")
+    # ==================================================================
+    logger.info("\n[?] Compiling GP tree...")
 
     feature_names = list(V1_GP_FEATURES)
     toolbox, pset = setup_gp_toolbox(cfg, feature_names)
@@ -119,10 +128,10 @@ def main(model_path: str = None, cfg: GPConfig = None):
     symbols = [s for s in TRADABLE_STOCKS if s in df["symbol"].unique()]
     logger.info(f"  Stocks: {symbols}")
 
-    # ══════════════════════════════════════════════════════════════════
+    # ==================================================================
     # STEP 5: Evaluate on all splits
-    # ══════════════════════════════════════════════════════════════════
-    logger.info("\n📊 Evaluating on all splits...")
+    # ==================================================================
+    logger.info("\n[?] Evaluating on all splits...")
 
     with Timer("Full evaluation"):
         eval_results = evaluate_best_individual(
@@ -141,16 +150,16 @@ def main(model_path: str = None, cfg: GPConfig = None):
     eval_path = str(OUTPUT_DIR / "evaluation_results.csv")
     save_evaluation_results(eval_results, eval_path)
 
-    # ── Quick summary DataFrame ────────────────────────────────────────
+    # -- Quick summary DataFrame ----------------------------------------
     summary_df = quick_summary(eval_results)
     summary_path = str(OUTPUT_DIR / "evaluation_summary.csv")
     summary_df.to_csv(summary_path, index=False)
     logger.info(f"  Summary saved: {summary_path}")
 
-    # ══════════════════════════════════════════════════════════════════
+    # ==================================================================
     # STEP 6: Regime analysis
-    # ══════════════════════════════════════════════════════════════════
-    logger.info("\n🔬 Running regime analysis...")
+    # ==================================================================
+    logger.info("\n[?] Running regime analysis...")
 
     with Timer("Regime analysis"):
         regime_results = run_regime_analysis(
@@ -168,9 +177,9 @@ def main(model_path: str = None, cfg: GPConfig = None):
         regime_path = str(OUTPUT_DIR / f"regime_{split_name}.csv")
         save_regime_results(split_results, regime_path)
 
-    # ══════════════════════════════════════════════════════════════════
+    # ==================================================================
     # STEP 7: Test set focus
-    # ══════════════════════════════════════════════════════════════════
+    # ==================================================================
     if test_df is not None and len(test_df) > 0:
         print_banner("TEST SET FOCUS (Out-of-Sample)")
 
@@ -185,9 +194,9 @@ def main(model_path: str = None, cfg: GPConfig = None):
                     f"trades={r.n_trades}"
                 )
 
-    # ══════════════════════════════════════════════════════════════════
+    # ==================================================================
     # DONE
-    # ══════════════════════════════════════════════════════════════════
+    # ==================================================================
     print_banner("EVALUATION COMPLETE")
     logger.info(f"  Results: {eval_path}")
     logger.info(f"  Summary: {summary_path}")
@@ -196,9 +205,9 @@ def main(model_path: str = None, cfg: GPConfig = None):
     return eval_results, regime_results
 
 
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 # CLI ENTRY POINT
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 
 def parse_args():
     parser = argparse.ArgumentParser(

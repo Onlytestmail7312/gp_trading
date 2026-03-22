@@ -67,6 +67,19 @@ def portfolio_fitness(results: Dict[str, BacktestResult], tree_size: int) -> flo
     return float(mean_fit - W_CONSISTENCY * std_fit)
 
 
+# Global state for multiprocessing workers
+_GLOBAL_TOOLBOX    = None
+_GLOBAL_TRAIN_DATA = None
+_GLOBAL_VAL_DATA   = None
+
+def init_worker(toolbox, train_data, val_data):
+    """Initialise worker process with shared state."""
+    global _GLOBAL_TOOLBOX, _GLOBAL_TRAIN_DATA, _GLOBAL_VAL_DATA
+    _GLOBAL_TOOLBOX    = toolbox
+    _GLOBAL_TRAIN_DATA = train_data
+    _GLOBAL_VAL_DATA   = val_data
+
+
 def evaluate_individual(
     individual,
     toolbox=None,
@@ -78,6 +91,14 @@ def evaluate_individual(
     BASE_FAIL = -50.0
 
     try:
+        # Use globals if not passed directly (multiprocessing workers)
+        if toolbox is None:
+            toolbox = _GLOBAL_TOOLBOX
+        if train_data is None:
+            train_data = _GLOBAL_TRAIN_DATA
+        if val_data is None:
+            val_data = _GLOBAL_VAL_DATA
+
         if toolbox is None or train_data is None or val_data is None:
             return (BASE_FAIL,)
 

@@ -1,13 +1,10 @@
-"""
-feature_engineering.py -- compute DAILY features from 1-minute OHLCV data.
-"""
-
 from __future__ import annotations
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import numpy as np
 import pandas as pd
 from typing import Optional
-
 from utils import get_logger
 from config import DAILY_FEATURES
 
@@ -15,35 +12,35 @@ log = get_logger()
 
 
 def resample_to_daily(df: pd.DataFrame) -> pd.DataFrame:
-    daily = df.resample("1D").agg({
+    df2 = df.copy()
+    if df2.index.tz is not None:
+        df2.index = df2.index.normalize()
+    daily = df2.resample("1D").agg({
         "open":   "first",
         "high":   "max",
         "low":    "min",
         "close":  "last",
         "volume": "sum",
-    }).dropna(subset=["close"])
-
+    })
+    daily = daily.dropna(subset=["close"])
     daily = daily[daily["volume"] > 0].copy()
     return daily
 
 
-def _sma(s: pd.Series, n: int) -> pd.Series:
+def _sma(s, n):
     return s.rolling(n, min_periods=n).mean()
 
-
-def _ema(s: pd.Series, n: int) -> pd.Series:
+def _ema(s, n):
     return s.ewm(span=n, adjust=False).mean()
 
-
-def _rsi(s: pd.Series, n: int = 14) -> pd.Series:
+def _rsi(s, n=14):
     delta = s.diff()
     gain  = delta.clip(lower=0).rolling(n).mean()
     loss  = (-delta.clip(upper=0)).rolling(n).mean()
     rs    = gain / (loss + 1e-8)
     return 100 - (100 / (1 + rs))
 
-
-def _atr(high: pd.Series, low: pd.Series, close: pd.Series, n: int = 14) -> pd.Series:
+def _atr(high, low, close, n=14):
     tr = pd.concat([
         high - low,
         (high - close.shift(1)).abs(),
@@ -51,8 +48,7 @@ def _atr(high: pd.Series, low: pd.Series, close: pd.Series, n: int = 14) -> pd.S
     ], axis=1).max(axis=1)
     return tr.rolling(n, min_periods=n).mean()
 
-
-def _macd(s: pd.Series, fast=12, slow=26, signal=9):
+def _macd(s, fast=12, slow=26, signal=9):
     ema_fast    = _ema(s, fast)
     ema_slow    = _ema(s, slow)
     macd_line   = ema_fast - ema_slow
@@ -60,8 +56,7 @@ def _macd(s: pd.Series, fast=12, slow=26, signal=9):
     histogram   = macd_line - signal_line
     return macd_line, signal_line, histogram
 
-
-def _bollinger_pct(s: pd.Series, n: int = 20) -> pd.Series:
+def _bollinger_pct(s, n=20):
     sma   = _sma(s, n)
     std   = s.rolling(n).std()
     upper = sma + 2 * std
@@ -71,7 +66,7 @@ def _bollinger_pct(s: pd.Series, n: int = 20) -> pd.Series:
 
 def compute_daily_features(
     daily: pd.DataFrame,
-    nifty_daily: Optional[pd.DataFrame] = None,
+    nifty_close: Optional[pd.Series] = None,
     symbol: str = "",
 ) -> pd.DataFrame:
     df = daily.copy()
@@ -80,35 +75,32 @@ def compute_daily_features(
     l  = df["low"]
     v  = df["volume"]
 
-    # Returns
     df["ret_1d"]  = c.pct_change(1)
     df["ret_5d"]  = c.pct_change(5)
     df["ret_10d"] = c.pct_change(10)
     df["ret_20d"] = c.pct_change(20)
 
-    # Trend
     df["close_vs_sma10"]  = c / _sma(c, 10)  - 1
     df["close_vs_sma20"]  = c / _sma(c, 20)  - 1
     df["close_vs_sma50"]  = c / _sma(c, 50)  - 1
     df["close_vs_sma200"] = c / _sma(c, 200) - 1
 
-    # Momentum
     df["rsi_14"] = _rsi(c, 14) / 100.0
     _, sig, hist = _macd(c)
     df["macd_signal"] = sig  / (c + 1e-8)
     df["macd_hist"]   = hist / (c + 1e-8)
 
-    # Volatility
     df["atr_pct_14"] = _atr(h, l, c, 14) / (c + 1e-8)
     df["bb_pct"]     = _bollinger_pct(c, 20)
 
-    # Volume
     vol_sma = _sma(v.astype(float), 20)
     df["volume_rel_20"] = v / (vol_sma + 1e-8)
 
-    # Nifty / Relative strength
-    if nifty_daily is not None:
-        nc = nifty_daily["close"].reindex(df.index, method="ffill")
+    if nifty_close is not None:
+        nc = nifty_close
+        matched = nc.notna().sum()
+        log.info(f"  {symbol}: nifty matched {matched}/{len(df)} dates")
+        nc = nc.ffill().bfill()
         df["nifty_ret_5d"]   = nc.pct_change(5)
         df["nifty_ret_20d"]  = nc.pct_change(20)
         df["nifty_vs_sma50"] = nc / _sma(nc, 50) - 1
@@ -133,9 +125,24 @@ def build_daily_features(
     nifty_1m: Optional[pd.DataFrame] = None,
     symbol: str = "",
 ) -> pd.DataFrame:
+    # Resample stock to daily
     daily = resample_to_daily(df_1m)
-    nifty_daily = resample_to_daily(nifty_1m) if nifty_1m is not None else None
 
-    feat_df = compute_daily_features(daily, nifty_daily, symbol)
+    nifty_close = None
+    if nifty_1m is not None:
+        # Resample nifty to daily
+        nifty_daily = resample_to_daily(nifty_1m)
+
+        # Align using plain date strings to avoid tz mismatch
+        nc = nifty_daily["close"].copy()
+        nc.index = pd.to_datetime([str(x)[:10] for x in nc.index])
+
+        stock_dates = pd.to_datetime([str(x)[:10] for x in daily.index])
+
+        nc_aligned = nc.reindex(stock_dates, method="ffill").bfill()
+        nc_aligned.index = daily.index
+        nifty_close = nc_aligned
+
+    feat_df = compute_daily_features(daily, nifty_close, symbol)
     feat_df["symbol"] = symbol
     return feat_df

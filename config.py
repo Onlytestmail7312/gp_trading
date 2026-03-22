@@ -59,13 +59,6 @@ DAILY_FEATURES = [
     "bb_pct",
     # Volume
     "volume_rel_20",
-    # Market (Nifty)
-    "nifty_ret_5d",
-    "nifty_ret_20d",
-    "nifty_vs_sma50",
-    # Relative strength vs Nifty
-    "rs_5d",
-    "rs_20d",
 ]
 
 N_FEATURES = len(DAILY_FEATURES)
@@ -100,7 +93,7 @@ GP_TOURNAMENT    = 5
 GP_MIN_DEPTH     = 2
 GP_MAX_DEPTH     = 6
 GP_MAX_NODES     = 40
-GP_EARLY_STOP    = 10
+GP_EARLY_STOP    = 15
 GP_CHUNK_SIZE    = 200
 GP_WORKERS       = 8
 

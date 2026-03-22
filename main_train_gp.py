@@ -43,9 +43,20 @@ def main():
         ckpt.unlink()
         log.info("  Old checkpoint deleted -- fresh evolution")
 
-    best, stats = run_evolution(
-        train_data = train_data,
-        val_data   = val_data,
+    from gp_individual import setup_gp_toolbox, get_hall_of_fame
+    from fitness import evaluate_individual
+    from config import DAILY_FEATURES
+
+    toolbox, pset = setup_gp_toolbox(feature_names=DAILY_FEATURES)
+
+    best, stats, hof = run_evolution(
+        toolbox=toolbox,
+        pset=pset,
+        evaluate_func=evaluate_individual,
+        evaluate_kwargs={
+            "train_data": train_data,
+            "val_data":   val_data,
+        },
     )
 
     log.info("")

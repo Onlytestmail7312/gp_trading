@@ -1,5 +1,5 @@
 """
-GP Primitives — safe mathematical functions for tree evaluation.
+GP Primitives [?] safe mathematical functions for tree evaluation.
 
 Spec Section 8: GP Representation
 Primitives: add, sub, mul, safe_div, abs, min, max, neg
@@ -14,15 +14,15 @@ from typing import List
 
 from deap import gp
 
-from .config import V1_GP_FEATURES, EPSILON
+from config import DAILY_FEATURES as V1_GP_FEATURES, EPSILON
 
 
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 # SAFE PRIMITIVE FUNCTIONS
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 
 def safe_div(a: float, b: float) -> float:
-    """Protected division — returns 0.0 when denominator is near-zero."""
+    """Protected division [?] returns 0.0 when denominator is near-zero."""
     try:
         if abs(b) < EPSILON:
             return 0.0
@@ -142,13 +142,13 @@ def safe_min(a: float, b: float) -> float:
         return 0.0
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# NORMALISE SIGNAL — tanh scaling for GP output
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
+# NORMALISE SIGNAL [?] tanh scaling for GP output
+# ===========================================================================
 
 def normalise_signal(raw: float) -> float:
     """
-    Convert raw GP tree output → normalised signal in [-1, 1].
+    Convert raw GP tree output -> normalised signal in [-1, 1].
     Uses tanh to smoothly squash any real number.
     +1 = max long, -1 = max short, 0 = neutral.
     """
@@ -160,18 +160,18 @@ def normalise_signal(raw: float) -> float:
         return 0.0
 
 
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 # EPHEMERAL CONSTANT GENERATOR
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 
 def ephemeral_constant() -> float:
     """Generate random constant in [-1.0, 1.0] for GP tree terminals."""
     return round(random.uniform(-1.0, 1.0), 4)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 # PRIMITIVE SET BUILDER
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 
 def build_primitive_set(feature_names: List[str] = None) -> gp.PrimitiveSetTyped:
     """
@@ -199,7 +199,7 @@ def build_primitive_set(feature_names: List[str] = None) -> gp.PrimitiveSetTyped
     # Create untyped primitive set with N input arguments
     pset = gp.PrimitiveSet("GPStrategy", n_features)
 
-    # ── Register primitives ────────────────────────────────────────────
+    # -- Register primitives --------------------------------------------
     # Binary (arity=2)
     pset.addPrimitive(safe_add, 2, name="add")
     pset.addPrimitive(safe_sub, 2, name="sub")
@@ -215,11 +215,11 @@ def build_primitive_set(feature_names: List[str] = None) -> gp.PrimitiveSetTyped
     pset.addPrimitive(safe_log, 1, name="log")
     pset.addPrimitive(safe_sqrt, 1, name="sqrt")
 
-    # ── Rename arguments to feature names ──────────────────────────────
+    # -- Rename arguments to feature names ------------------------------
     for i, name in enumerate(feature_names):
         pset.renameArguments(**{f"ARG{i}": name})
 
-    # ── Fixed constants ────────────────────────────────────────────────
+    # -- Fixed constants ------------------------------------------------
     pset.addTerminal(0.0, name="zero")
     pset.addTerminal(1.0, name="one")
     pset.addTerminal(-1.0, name="neg_one")
@@ -227,15 +227,15 @@ def build_primitive_set(feature_names: List[str] = None) -> gp.PrimitiveSetTyped
     pset.addTerminal(0.1, name="tenth")
     pset.addTerminal(0.01, name="hundredth")
 
-    # ── Ephemeral constant ─────────────────────────────────────────────
+    # -- Ephemeral constant ---------------------------------------------
     pset.addEphemeralConstant("rand_const", ephemeral_constant)
 
     return pset
 
 
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 # SIGNAL DIVERSITY CHECK
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 
 MIN_SIGNAL_STD = 0.01  # Minimum std of normalised signals to be valid
 
@@ -286,9 +286,9 @@ def check_signal_diversity(
     return std >= MIN_SIGNAL_STD
 
 
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 # TREE UTILITIES
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 
 def tree_depth(individual) -> int:
     """Compute the depth of a GP tree."""

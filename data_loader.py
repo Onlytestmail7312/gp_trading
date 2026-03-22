@@ -9,8 +9,8 @@ import pandas as pd
 import duckdb
 from typing import Optional, List
 
-from gp_system_complete.config import DB_PATH, ALL_SYMBOLS, BARS_PER_DAY
-from gp_system_complete.utils import get_logger
+from config import DB_PATH, ALL_SYMBOLS, BARS_PER_DAY
+from utils import get_logger
 
 
 def load_symbol(
@@ -64,7 +64,7 @@ def load_symbol(
 
     log.info(
         f"Loaded {symbol}: {len(df):,} bars, "
-        f"{df.index[0].date()} → {df.index[-1].date()}, "
+        f"{df.index[0].date()} -> {df.index[-1].date()}, "
         f"~{len(df) / BARS_PER_DAY:.0f} days"
     )
     return df
@@ -134,9 +134,9 @@ def validate_data(df: pd.DataFrame, symbol: str) -> dict:
     checks["duplicate_ts"] = df.index.duplicated().sum()
 
     log = get_logger()
-    status = "✅" if all(
+    status = "[OK]" if all(
         checks[k] == 0 for k in ["zero_prices", "negative_prices", "high_lt_low"]
-    ) else "⚠️"
+    ) else "[WARN][?]"
     log.info(
         f"{status} {symbol}: {checks['rows']:,} rows, "
         f"NaN={checks['nan_pct']:.2f}%, "

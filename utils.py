@@ -1,3 +1,12 @@
+import sys, os
+os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 """
 Shared utility functions: logging, formatting, directory creation.
 """
@@ -10,12 +19,12 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional
 
-from gp_system_complete.config import OUTPUT_DIR
+from config import OUTPUT_DIR
 
 
-# ═══════════════════════════════════════════════════════════════════
+# ===================================================================
 # DIRECTORY SETUP
-# ═══════════════════════════════════════════════════════════════════
+# ===================================================================
 def ensure_output_dirs() -> None:
     """Create all required output directories."""
     dirs = [
@@ -29,9 +38,9 @@ def ensure_output_dirs() -> None:
         d.mkdir(parents=True, exist_ok=True)
 
 
-# ═══════════════════════════════════════════════════════════════════
+# ===================================================================
 # LOGGING
-# ═══════════════════════════════════════════════════════════════════
+# ===================================================================
 _logger: Optional[logging.Logger] = None
 
 
@@ -50,7 +59,7 @@ def get_logger(name: str = "gp_system") -> logging.Logger:
     ch = logging.StreamHandler(sys.stdout)
     ch.setLevel(logging.INFO)
     fmt = logging.Formatter(
-        "%(asctime)s │ %(levelname)-7s │ %(message)s",
+        "%(asctime)s | %(levelname)-7s | %(message)s",
         datefmt="%H:%M:%S",
     )
     ch.setFormatter(fmt)
@@ -60,7 +69,7 @@ def get_logger(name: str = "gp_system") -> logging.Logger:
     fh = logging.FileHandler(OUTPUT_DIR / "logs" / "gp_system.log", mode="a")
     fh.setLevel(logging.DEBUG)
     fh.setFormatter(logging.Formatter(
-        "%(asctime)s │ %(levelname)-7s │ %(name)s │ %(message)s"
+        "%(asctime)s | %(levelname)-7s | %(name)s | %(message)s"
     ))
     logger.addHandler(fh)
 
@@ -68,9 +77,9 @@ def get_logger(name: str = "gp_system") -> logging.Logger:
     return logger
 
 
-# ═══════════════════════════════════════════════════════════════════
+# ===================================================================
 # TIME FORMATTING
-# ═══════════════════════════════════════════════════════════════════
+# ===================================================================
 def fmt_seconds(seconds: float) -> str:
     """Format seconds into human-readable string."""
     s = max(int(seconds), 0)
@@ -105,16 +114,16 @@ class Timer:
             log.info(f"{self.label} took {fmt_seconds(self.elapsed)}")
 
 
-# ═══════════════════════════════════════════════════════════════════
+# ===================================================================
 # BANNER
-# ═══════════════════════════════════════════════════════════════════
+# ===================================================================
 def print_banner(title: str) -> None:
     """Print a section banner."""
     log = get_logger()
     width = 70
-    log.info("═" * width)
+    log.info("=" * width)
     log.info(f"  {title}")
-    log.info("═" * width)
+    log.info("=" * width)
 
 
 def print_table(headers: list, rows: list, col_widths: Optional[list] = None) -> None:
@@ -126,7 +135,7 @@ def print_table(headers: list, rows: list, col_widths: Optional[list] = None) ->
 
     header_line = "  ".join(str(h).ljust(w) for h, w in zip(headers, col_widths))
     log.info(header_line)
-    log.info("─" * len(header_line))
+    log.info("-" * len(header_line))
     for row in rows:
         line = "  ".join(str(v).ljust(w) for v, w in zip(row, col_widths))
         log.info(line)

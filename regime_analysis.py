@@ -1,33 +1,33 @@
 """
-Regime Analysis — bull/bear/flat slicing and per-regime evaluation.
+Regime Analysis [?] bull/bear/flat slicing and per-regime evaluation.
 
 Spec Section 14: Regime-Aware Evaluation (Post-Training)
 - Label each bar by trend_50d_return thresholds
 - Slice data into BULL / BEAR / FLAT regimes
 - Evaluate the unified model on each regime slice
 - Report per-regime metrics
-- This is evaluation-only — the model trains on ALL data unified
+- This is evaluation-only [?] the model trains on ALL data unified
 """
 
 import numpy as np
 import pandas as pd
 from typing import Dict, List, Optional, Tuple
 
-from .config import (
+from config import (
     GPConfig, DEFAULT_GP_CONFIG, V1_GP_FEATURES,
     REGIME_BULL_THRESHOLD, REGIME_BEAR_THRESHOLD,
     TRADABLE_STOCKS, OUTPUT_DIR,
 )
-from .backtester import BacktestResult, backtest_stock
-from .fitness import prepare_eval_data
-from .utils import get_logger, print_banner, print_table
+from backtester import BacktestResult, backtest_stock
+from fitness import prepare_eval_data
+from utils import get_logger, print_banner, print_table
 
 logger = get_logger("regime_analysis")
 
 
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 # REGIME LABELLING
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 
 REGIME_BULL = "BULL"
 REGIME_BEAR = "BEAR"
@@ -49,9 +49,9 @@ def label_regimes(
     df : pd.DataFrame
         Must contain 'trend_50d_return' column.
     bull_threshold : float
-        Return > this → BULL. Default: +5%
+        Return > this -> BULL. Default: +5%
     bear_threshold : float
-        Return < this → BEAR. Default: -5%
+        Return < this -> BEAR. Default: -5%
 
     Returns
     -------
@@ -64,7 +64,7 @@ def label_regimes(
         bear_threshold = REGIME_BEAR_THRESHOLD
 
     if "trend_50d_return" not in df.columns:
-        logger.warning("  ⚠️ 'trend_50d_return' not in DataFrame — all FLAT")
+        logger.warning("  [WARN][?] 'trend_50d_return' not in DataFrame [?] all FLAT")
         return pd.Series(REGIME_FLAT, index=df.index)
 
     trend = df["trend_50d_return"]
@@ -91,9 +91,9 @@ def add_regime_column(
     return df
 
 
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 # REGIME STATISTICS
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 
 def regime_distribution(df: pd.DataFrame) -> Dict[str, dict]:
     """
@@ -134,7 +134,7 @@ def print_regime_distribution(df: pd.DataFrame, title: str = ""):
 
     header = f"REGIME DISTRIBUTION"
     if title:
-        header += f" — {title}"
+        header += f" [?] {title}"
     print_banner(header)
 
     headers = ["Regime", "Bars", "Pct%", "Avg Trend Return%"]
@@ -151,9 +151,9 @@ def print_regime_distribution(df: pd.DataFrame, title: str = ""):
     print_table(headers, rows)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 # PER-REGIME EVALUATION
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 
 def evaluate_by_regime(
     func,
@@ -203,7 +203,7 @@ def evaluate_by_regime(
         regime_df = df[df["regime"] == regime]
 
         if len(regime_df) < 100:
-            logger.info(f"  ⏭️  {regime}: too few bars ({len(regime_df)}), skipping")
+            logger.info(f"  [?]  {regime}: too few bars ({len(regime_df)}), skipping")
             continue
 
         for symbol in symbols:
@@ -216,14 +216,14 @@ def evaluate_by_regime(
                 result = backtest_stock(func, features, prices, cfg)
                 results[regime][symbol] = result
             except Exception as exc:
-                logger.warning(f"  ⚠️ {regime}/{symbol}: {exc}")
+                logger.warning(f"  [WARN][?] {regime}/{symbol}: {exc}")
 
     return results
 
 
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 # PRINT REGIME EVALUATION
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 
 def print_regime_evaluation(
     results: Dict[str, Dict[str, BacktestResult]],
@@ -241,7 +241,7 @@ def print_regime_evaluation(
     for regime in ALL_REGIMES:
         regime_results = results.get(regime, {})
         if not regime_results:
-            rows.append([regime, "—", "—", "—", "—", "—", "—", "—"])
+            rows.append([regime, "[?]", "[?]", "[?]", "[?]", "[?]", "[?]", "[?]"])
             continue
 
         for symbol in sorted(regime_results.keys()):
@@ -259,10 +259,10 @@ def print_regime_evaluation(
 
     print_table(headers, rows)
 
-    # ── Aggregated per-regime summary ──────────────────────────────────
-    print("\n" + "─" * 60)
+    # -- Aggregated per-regime summary ----------------------------------
+    print("\n" + "-" * 60)
     print("  REGIME SUMMARY (averaged across stocks):")
-    print("─" * 60)
+    print("-" * 60)
 
     for regime in ALL_REGIMES:
         regime_results = results.get(regime, {})
@@ -281,12 +281,12 @@ def print_regime_evaluation(
             f"n_stocks={len(returns)}"
         )
 
-    print("═" * 60)
+    print("=" * 60)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 # SAVE REGIME RESULTS
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 
 def save_regime_results(
     results: Dict[str, Dict[str, BacktestResult]],
@@ -320,12 +320,12 @@ def save_regime_results(
         writer.writeheader()
         writer.writerows(rows)
 
-    logger.info(f"  📊 Regime results saved: {filepath}")
+    logger.info(f"  [?] Regime results saved: {filepath}")
 
 
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 # FULL REGIME ANALYSIS PIPELINE
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 
 def run_regime_analysis(
     func,
@@ -376,7 +376,7 @@ def run_regime_analysis(
         # Print results
         print_regime_evaluation(
             regime_results,
-            title=f"REGIME EVAL — {split_name.upper()}",
+            title=f"REGIME EVAL [?] {split_name.upper()}",
         )
 
     return all_results

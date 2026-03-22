@@ -21,9 +21,9 @@ def make_snapshot():
     if os.path.exists(RESEARCH_DB):
         try:
             os.remove(RESEARCH_DB)
-            print(f"🗑️ Deleted old {RESEARCH_DB}")
+            print(f"[?] Deleted old {RESEARCH_DB}")
         except PermissionError:
-            print(f"❌ Could not delete {RESEARCH_DB}. Is it open in another program?")
+            print(f"[FAIL] Could not delete {RESEARCH_DB}. Is it open in another program?")
             return
 
     # 1. Connect and Attach
@@ -33,7 +33,7 @@ def make_snapshot():
     # Convert list to SQL format: 'STOCK1', 'STOCK2', 'STOCK3'
     symbol_str = ", ".join([f"'{s}'" for s in ALL_SYMBOLS])
 
-    print(f"📊 Extracting 1m and Daily data for: {', '.join(ALL_SYMBOLS)}")
+    print(f"[?] Extracting 1m and Daily data for: {', '.join(ALL_SYMBOLS)}")
 
     # 2. Extract 1-Minute Data (DISTINCT prevents duplicates)
     # Using DISTINCT ensures that if the source has double entries, the snapshot won't.
@@ -62,7 +62,7 @@ def make_snapshot():
     """)
 
     # 4. Create Performance Indices
-    print("⚡ Creating Search Indices for ASOF JOIN speed...")
+    print("[?] Creating Search Indices for ASOF JOIN speed...")
     res_con.execute("CREATE INDEX idx_m1 ON min_1m (symbol, ts)")
     res_con.execute("CREATE INDEX idx_d1 ON daily_ctx (symbol, ts)")
 
@@ -73,21 +73,21 @@ def make_snapshot():
     
     # 1-Minute Breakdown
     m1_stats = res_con.execute("SELECT symbol, count(*) FROM min_1m GROUP BY symbol ORDER BY symbol").fetchall()
-    print("✅ 1-Minute Row Counts:")
+    print("[OK] 1-Minute Row Counts:")
     for sym, count in m1_stats:
         print(f"   - {sym:10}: {count:,} rows")
 
     # Daily Breakdown
     d1_stats = res_con.execute("SELECT symbol, count(*) FROM daily_ctx GROUP BY symbol ORDER BY symbol").fetchall()
-    print("\n✅ Daily Row Counts:")
+    print("\n[OK] Daily Row Counts:")
     for sym, count in d1_stats:
         print(f"   - {sym:10}: {count:,} rows")
 
     total_m1 = sum(count for sym, count in m1_stats)
     if total_m1 == 0:
-        print("\n❌ WARNING: Snapshot is empty. Verify symbol names in source DB!")
+        print("\n[FAIL] WARNING: Snapshot is empty. Verify symbol names in source DB!")
     else:
-        print(f"\n🚀 Success! '{RESEARCH_DB}' is ready for Multi-Stock Genetic Programming.")
+        print(f"\n[?] Success! '{RESEARCH_DB}' is ready for Multi-Stock Genetic Programming.")
 
     res_con.close()
 
