@@ -35,7 +35,7 @@ def single_stock_fitness(result: BacktestResult, tree_size: int) -> float:
     else:
         trade_bonus = -0.5
 
-    complexity = COMPLEXITY_PENALTY * (tree_size / GP_MAX_NODES)
+    complexity = COMPLEXITY_PENALTY * (tree_size / GP_MAX_NODES) ** 2
 
     fitness = (
         W_ANNUAL_RETURN * ann_ret

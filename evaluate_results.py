@@ -63,6 +63,12 @@ def print_results(results, period_name):
 def plot_equity_curves(results, period_name, save_path=None):
     try:
         import matplotlib.pyplot as plt
+
+# Color palette -- defined here so all functions can access it
+COLORS = [
+    "#2196F3", "#4CAF50", "#FF9800", "#F44336",
+    "#9C27B0", "#00BCD4", "#FF5722", "#607D8B",
+]
         import matplotlib.dates as mdates
 
         fig, axes = plt.subplots(2, 3, figsize=(18, 10))
@@ -76,7 +82,7 @@ def plot_equity_curves(results, period_name, save_path=None):
             equity = r.equity_curve
             x = np.arange(len(equity))
 
-            ax.plot(x, (equity - 1) * 100, color=colors[idx], linewidth=1.5)
+            ax.plot(x, (equity - 1) * 100, color=COLORS[idx], linewidth=1.5)
             ax.axhline(y=0, color='black', linewidth=0.5, linestyle='--')
             ax.fill_between(x, (equity - 1) * 100, 0,
                           where=(equity >= 1), alpha=0.1, color='green')
@@ -105,6 +111,12 @@ def plot_equity_curves(results, period_name, save_path=None):
 def plot_trade_distribution(results, period_name, save_path=None):
     try:
         import matplotlib.pyplot as plt
+
+# Color palette -- defined here so all functions can access it
+COLORS = [
+    "#2196F3", "#4CAF50", "#FF9800", "#F44336",
+    "#9C27B0", "#00BCD4", "#FF5722", "#607D8B",
+]
 
         all_returns = []
         all_holds   = []
@@ -153,7 +165,7 @@ def plot_trade_distribution(results, period_name, save_path=None):
         for sym, r in results.items():
             sym_counts[sym] = r.n_trades
         bars = ax.bar(sym_counts.keys(), sym_counts.values(),
-                     color=colors[:len(sym_counts)])
+                     color=COLORS[:len(sym_counts)])
         ax.set_title("Trades per Stock")
         ax.set_xlabel("Symbol")
         ax.set_ylabel("Number of Trades")

@@ -67,7 +67,7 @@ def build_full_feature_dataset(
 
 
 def split_dataset(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    train = df[df.index <  TRAIN_END].copy()
+    train = df[df.index <= TRAIN_END].copy()
     val   = df[(df.index >= VAL_START) & (df.index < VAL_END)].copy()
     test  = df[df.index >= TEST_START].copy()
 

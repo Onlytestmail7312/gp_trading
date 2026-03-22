@@ -20,7 +20,7 @@ from typing import Tuple, List, Dict, Optional, Callable
 
 import numpy as np
 import dill
-from deap import tools, gp
+from deap import tools, gp, creator
 
 from config import GP_POPULATION, GP_GENERATIONS, GP_CROSSOVER, GP_MUTATION, GP_ELITE, GP_TOURNAMENT, GP_MIN_DEPTH, GP_MAX_DEPTH, GP_MAX_NODES, GP_EARLY_STOP, GP_CHUNK_SIZE, GP_WORKERS, DAILY_FEATURES, OUTPUT_DIR
 from gp_individual import (
@@ -166,10 +166,11 @@ def load_best_model(filepath: str) -> Optional[dict]:
 
 def _compute_gen_stats(population: list, gen: int, elapsed: float) -> dict:
     """Compute statistics for one generation."""
+    FITNESS_INVALID_THRESHOLD = -99.0
     valid_fits = [
         ind.fitness.values[0]
         for ind in population
-        if ind.fitness.valid and ind.fitness.values[0] > -99
+        if ind.fitness.valid and ind.fitness.values[0] > FITNESS_INVALID_THRESHOLD
     ]
 
     if not valid_fits:
@@ -474,7 +475,7 @@ def _evolution_loop(
                 try:
                     # Store current generation on toolbox for fitness function to access
                     toolbox.current_generation = gen
-                    fitnesses = list(toolbox.map(toolbox.evaluate, chunk))
+                    fitnesses = list(map(toolbox.evaluate, chunk))
                     for ind, fit in zip(chunk, fitnesses):
                         ind.fitness.values = fit
                 except Exception as exc:

@@ -310,3 +310,78 @@ def tree_to_string(individual, pset) -> str:
         return str(individual)
     except Exception:
         return "<unprintable>"
+
+# ===========================================================================
+# INFIX NOTATION CONVERTER
+# ===========================================================================
+
+# Operator symbols for infix display
+_INFIX_OPS = {
+    "add": "+",
+    "sub": "-",
+    "mul": "*",
+    "div": "/",
+    "max": "max",
+    "min": "min",
+    "neg": "-",
+    "sqrt": "sqrt",
+    "log": "log",
+    "exp": "exp",
+}
+
+def tree_to_infix(individual) -> str:
+    """
+    Convert a GP tree from prefix (LISP) notation to human-readable infix.
+
+    Example:
+        add(sub(rsi_14, half), mul(close_vs_sma20, ret_5d))
+        -> ((rsi_14 - 0.5) + (close_vs_sma20 * ret_5d))
+    """
+    try:
+        tokens = str(individual).replace("(", " ( ").replace(")", " ) ").replace(",", " ").split()
+        result, _ = _parse_infix(tokens, 0)
+        return result
+    except Exception:
+        return str(individual)
+
+
+def _parse_infix(tokens, pos):
+    """Recursive parser for infix conversion."""
+    if pos >= len(tokens):
+        return "?", pos
+
+    token = tokens[pos]
+
+    # Terminal (leaf node)
+    if token not in _INFIX_OPS and token not in ("(", ")"):
+        return token, pos + 1
+
+    # Function call: func(arg1, arg2, ...)
+    if token in _INFIX_OPS:
+        op = _INFIX_OPS[token]
+        pos += 1  # skip function name
+
+        # Skip opening paren if present
+        if pos < len(tokens) and tokens[pos] == "(":
+            pos += 1
+
+        args = []
+        while pos < len(tokens) and tokens[pos] != ")":
+            if tokens[pos] == ",":
+                pos += 1
+                continue
+            arg, pos = _parse_infix(tokens, pos)
+            args.append(arg)
+
+        # Skip closing paren
+        if pos < len(tokens) and tokens[pos] == ")":
+            pos += 1
+
+        if len(args) == 1:
+            return f"{op}({args[0]})", pos
+        elif len(args) == 2:
+            return f"({args[0]} {op} {args[1]})", pos
+        else:
+            return f"{op}({', '.join(args)})", pos
+
+    return token, pos + 1

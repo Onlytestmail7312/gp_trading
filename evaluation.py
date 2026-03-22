@@ -13,14 +13,9 @@ import numpy as np
 import pandas as pd
 from typing import Dict, List, Optional, Tuple
 
-from config import (
-    GPConfig, DEFAULT_GP_CONFIG, V1_GP_FEATURES,
-    TRADABLE_STOCKS, OUTPUT_DIR,
-)
-from backtester import (
-    BacktestResult, backtest_stock, generate_signals_vectorised, run_backtest,
-)
-from fitness import prepare_eval_data, prepare_multi_stock_eval_data, composite_fitness
+from config import ALL_SYMBOLS, DAILY_FEATURES, OUTPUT_DIR
+from backtester import BacktestResult, backtest_portfolio, generate_signal
+from fitness import evaluate_individual
 from gp_primitives import normalise_signal
 from utils import get_logger, print_banner, print_table
 

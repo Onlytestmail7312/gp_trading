@@ -1,55 +1,34 @@
-content = open('backtester.py', encoding='utf-8').read()
+content = open('main_train_gp.py', encoding='utf-8').read()
 
-old = '''        if not in_trade:
-            # Bull regime: only take LONG signals
-            if curr_regime == 1:
-                if prev_sig <= 0 and curr_sig > 0:
-                    in_trade    = True
-                    direction   = 1
-                    entry_day   = i
-                    entry_price = price * (1 + cost_pct)
-                    entry_sig   = curr_sig
-                    peak_price  = entry_price
+old = '''import sys, os'''
 
-            # Bear regime: only take SHORT signals
-            elif curr_regime == -1:
-                if prev_sig >= 0 and curr_sig < 0:
-                    in_trade    = True
-                    direction   = -1
-                    entry_day   = i
-                    entry_price = price * (1 - cost_pct)
-                    entry_sig   = curr_sig
-                    peak_price  = entry_price'''
+new = '''import sys, os
+import random
+import argparse
+import numpy as np'''
 
-new = '''        if not in_trade:
-            # Bull regime: only take LONG signals
-            if curr_regime == 1:
-                if prev_sig <= 0 and curr_sig > 0 and curr_sig >= signal_threshold:
-                    # Use next day open for realistic execution
-                    next_open   = opens[i+1] if (opens is not None and i+1 < len(opens)) else price
-                    in_trade    = True
-                    direction   = 1
-                    entry_day   = i
-                    entry_price = next_open * (1 + cost_pct)
-                    entry_sig   = curr_sig
-                    peak_price  = entry_price
-
-            # Bear regime: only take SHORT signals
-            elif curr_regime == -1:
-                if prev_sig >= 0 and curr_sig < 0 and abs(curr_sig) >= signal_threshold:
-                    next_open   = opens[i+1] if (opens is not None and i+1 < len(opens)) else price
-                    in_trade    = True
-                    direction   = -1
-                    entry_day   = i
-                    entry_price = next_open * (1 - cost_pct)
-                    entry_sig   = curr_sig
-                    peak_price  = entry_price'''
-
-if old in content:
+if old in content and 'argparse' not in content:
     content = content.replace(old, new)
-    open('backtester.py', 'w', encoding='utf-8').write(content)
-    print('Fixed -- next day open entry')
+    print('Added imports')
 else:
-    print('Pattern not found')
-    idx = content.find('if not in_trade')
-    print(repr(content[idx:idx+300]))
+    print('imports already exist or pattern not found')
+
+# Add seed parsing inside main()
+old_main = '''def main():'''
+new_main = '''def main():
+    # Parse CLI arguments for reproducibility
+    parser = argparse.ArgumentParser(description="GP Trading System Trainer")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed")
+    args, _ = parser.parse_known_args()
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+'''
+
+if old_main in content and 'parse_known_args' not in content:
+    content = content.replace(old_main, new_main)
+    open('main_train_gp.py', 'w', encoding='utf-8').write(content)
+    print('Fixed #26 CLI seed')
+else:
+    print('Pattern not found or already fixed')
+    idx = content.find('def main')
+    print(repr(content[idx:idx+200]))

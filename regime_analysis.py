@@ -14,10 +14,12 @@ import pandas as pd
 from typing import Dict, List, Optional, Tuple
 
 from config import (
-    GPConfig, DEFAULT_GP_CONFIG, V1_GP_FEATURES,
-    REGIME_BULL_THRESHOLD, REGIME_BEAR_THRESHOLD,
-    TRADABLE_STOCKS, OUTPUT_DIR,
+    ALL_SYMBOLS as TRADABLE_STOCKS,
+    DAILY_FEATURES as V1_GP_FEATURES,
+    OUTPUT_DIR,
 )
+REGIME_BULL_THRESHOLD = 0.05
+REGIME_BEAR_THRESHOLD = -0.05
 from backtester import BacktestResult, backtest_stock
 from fitness import prepare_eval_data
 from utils import get_logger, print_banner, print_table

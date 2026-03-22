@@ -122,3 +122,24 @@ MIN_TRADES_TOTAL     = 10
 MIN_TRADES_PER_STOCK = 2
 
 EPSILON = 1e-8
+
+
+# ===========================================================================
+# CONFIG VALIDATION
+# ===========================================================================
+
+def validate_config():
+    """Validate configuration values to catch misconfiguration early."""
+    assert GP_POPULATION > 0,            "GP_POPULATION must be positive"
+    assert GP_GENERATIONS > 0,           "GP_GENERATIONS must be positive"
+    assert 0 < GP_CROSSOVER < 1,         "GP_CROSSOVER must be in (0, 1)"
+    assert 0 < GP_MUTATION < 1,          "GP_MUTATION must be in (0, 1)"
+    assert GP_CROSSOVER + GP_MUTATION <= 1.0, "GP_CROSSOVER + GP_MUTATION should be <= 1.0"
+    assert MIN_HOLD_DAYS < MAX_HOLD_DAYS, "MIN_HOLD_DAYS must be less than MAX_HOLD_DAYS"
+    assert GP_MIN_DEPTH < GP_MAX_DEPTH,  "GP_MIN_DEPTH must be less than GP_MAX_DEPTH"
+    assert STOP_LOSS_PCT < TRAILING_STOP_PCT, "STOP_LOSS_PCT should be tighter than TRAILING_STOP_PCT"
+    print("  [OK] Config validation passed")
+
+
+if __name__ == "__main__":
+    validate_config()

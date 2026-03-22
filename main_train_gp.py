@@ -1,4 +1,7 @@
 import sys, os
+import random
+import argparse
+import numpy as np
 os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 if sys.platform == "win32":
     try:
@@ -24,6 +27,13 @@ log = get_logger()
 
 
 def main():
+    # Parse CLI arguments for reproducibility
+    parser = argparse.ArgumentParser(description="GP Trading System Trainer")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed")
+    args, _ = parser.parse_known_args()
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+
     t0 = time.time()
     print_banner("GP POSITIONAL TRADING -- EVOLUTION")
 

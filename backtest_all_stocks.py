@@ -69,11 +69,15 @@ def generate_trade_signals(func, feat_df, sym):
     entry_sig   = 0.0
     peak_price  = 0.0
 
-    STOP_LOSS        = 0.05
-    TRAILING_STOP    = 0.07
-    MIN_HOLD         = 3
-    MAX_HOLD         = 60
-    COST             = 0.0005
+    from config import (
+        STOP_LOSS_PCT, TRAILING_STOP_PCT,
+        MIN_HOLD_DAYS, MAX_HOLD_DAYS, TOTAL_COST_PCT,
+    )
+    STOP_LOSS     = STOP_LOSS_PCT
+    TRAILING_STOP = TRAILING_STOP_PCT
+    MIN_HOLD      = MIN_HOLD_DAYS
+    MAX_HOLD      = MAX_HOLD_DAYS
+    COST          = TOTAL_COST_PCT
 
     for i in range(1, len(signal)):
         prev_sig    = signal[i - 1]

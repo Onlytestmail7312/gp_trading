@@ -156,8 +156,16 @@ def build_daily_features(
         matched = (~nc_aligned.isna()).sum()
         log.info(f"  {symbol}: nifty matched {matched}/{len(daily)} dates")
 
-        if matched > 0:
+        MIN_NIFTY_MATCH_PCT = 0.8
+        match_pct = matched / max(len(daily), 1)
+        if match_pct >= MIN_NIFTY_MATCH_PCT:
             nifty_close = nc_aligned
+        else:
+            log.warning(
+                f"Nifty match rate too low "
+                f"({match_pct:.1%}), setting Nifty features to zero"
+            )
+            nifty_close = None
 
     feat_df = compute_daily_features(daily, nifty_close, symbol)
     feat_df["symbol"] = symbol

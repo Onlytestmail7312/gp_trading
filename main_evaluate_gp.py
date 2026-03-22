@@ -29,11 +29,11 @@ from datetime import datetime
 
 import pandas as pd
 
-from config import (
-    GPConfig, DEFAULT_GP_CONFIG, V1_GP_FEATURES,
-    TRADABLE_STOCKS, OUTPUT_DIR,
-)
-from dataset_builder import load_feature_dataset, split_by_time
+from config import DAILY_FEATURES, ALL_SYMBOLS, OUTPUT_DIR
+# Aliases for backward compatibility
+V1_GP_FEATURES = DAILY_FEATURES
+TRADABLE_STOCKS = ALL_SYMBOLS
+from dataset_builder import load_features, split_dataset
 from gp_individual import setup_gp_toolbox, compile_individual
 from gp_engine import load_best_model
 from evaluation import (
@@ -53,11 +53,11 @@ from utils import get_logger, print_banner, ensure_output_dirs, Timer
 logger = get_logger("main_evaluate")
 
 
-def main(model_path: str = None, cfg: GPConfig = None):
+def main(model_path: str = None, cfg=None):
     """Run the full evaluation pipeline on a saved model."""
 
     if cfg is None:
-        cfg = DEFAULT_GP_CONFIG
+        cfg = {}
     if model_path is None:
         model_path = cfg.best_model_file
 

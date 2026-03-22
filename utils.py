@@ -41,14 +41,14 @@ def ensure_output_dirs() -> None:
 # ===================================================================
 # LOGGING
 # ===================================================================
-_logger: Optional[logging.Logger] = None
+_loggers: dict = {}
 
 
 def get_logger(name: str = "gp_system") -> logging.Logger:
     """Return a configured logger (console + file)."""
-    global _logger
-    if _logger is not None:
-        return _logger
+    global _loggers
+    if name in _loggers:
+        return _loggers[name]
 
     ensure_output_dirs()
 
