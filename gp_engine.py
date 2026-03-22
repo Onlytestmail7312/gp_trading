@@ -434,8 +434,10 @@ def _evolution_loop(
                         f"[{i}→{end_idx}]..."
                     )
 
-                # Parallel evaluation
+                # Parallel evaluation with generation-aware fitness
                 try:
+                    # Store current generation on toolbox for fitness function to access
+                    toolbox.current_generation = gen
                     fitnesses = list(toolbox.map(toolbox.evaluate, chunk))
                     for ind, fit in zip(chunk, fitnesses):
                         ind.fitness.values = fit

@@ -1,7 +1,7 @@
 """
 Fitness — composite fitness scoring with multi-stock aggregation.
 
-Spec Section 9: Fitness Function
+SPEC SECTION 9: FITNESS FUNCTION
   composite_fitness = (
       w_sharpe * sharpe
     + w_sortino * sortino
@@ -11,8 +11,13 @@ Spec Section 9: Fitness Function
     - complexity_penalty_weight * tree_size / max_nodes
   )
 
-Spec Section 11: Multi-Stock Aggregation
+SPEC SECTION 11: MULTI-STOCK AGGREGATION
   fitness_total = mean(stock_fitness) - lambda * std(stock_fitness)
+
+REVISED APPROACH (after evolution failure diagnosis):
+  - Graduated penalties instead of hard rejection
+  - Phased difficulty: filters get stricter over generations
+  - Minimum viable individuals can survive early generations
 """
 
 import math
@@ -30,9 +35,9 @@ from .backtester import (
 from .gp_primitives import check_signal_diversity, normalise_signal
 
 
-# ═══════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 # COMPOSITE FITNESS (single stock)
-# ═══════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def composite_fitness(
     result: BacktestResult,
@@ -59,7 +64,7 @@ def composite_fitness(
     if cfg is None:
         cfg = DEFAULT_GP_CONFIG
 
-    # ── Component scores ───────────────────────────────────────────────
+    # ── Component scores ─────────────────────────────────────────────────────
     sharpe_score = cfg.w_sharpe * result.sharpe_ratio
 
     sortino_score = cfg.w_sortino * result.sortino_ratio
@@ -77,13 +82,7 @@ def composite_fitness(
         tree_size / cfg.max_tree_nodes
     )
 
-    # Penalise low trade counts
-    low_trade_penalty = cfg.w_low_trades * max(0, cfg.min_trades - result.n_trades) / cfg.min_trades
-
-    # Bonus for high trade counts
-    trade_bonus = cfg.w_trade_bonus * min(result.n_trades / 50, 1)
-
-    # ── Composite ──────────────────────────────────────────────────────
+    # ── Composite ─────────────────────────────────────────────────────────────
     fitness = (
         sharpe_score
         + sortino_score
@@ -91,16 +90,14 @@ def composite_fitness(
         - dd_penalty
         - trade_penalty
         - complexity_penalty
-        - low_trade_penalty
-        + trade_bonus
     )
 
     return fitness
 
 
-# ═══════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 # MULTI-STOCK AGGREGATED FITNESS
-# ═══════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def multi_stock_fitness(
     per_stock_fitness: Dict[str, float],
@@ -145,12 +142,71 @@ def multi_stock_fitness(
     return float(total)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# FULL EVALUATION PIPELINE (called by GP engine)
-# ═══════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+# GRADUATED PENALTY SYSTEM
+# ═══════════════════════════════════════════════════════════════════════════════
 
-# Minimum tree size to avoid degenerate formulas
-MIN_TREE_LENGTH = 7
+def compute_tree_penalty(tree_size: int, min_size: int = 7) -> float:
+    """
+    Graduated penalty for tree complexity.
+    
+    Instead of hard rejection, apply a penalty that increases as tree
+    gets smaller than minimum.
+    
+    Returns a multiplier: 1.0 = no penalty, 0.0 = maximum penalty
+    """
+    if tree_size >= min_size:
+        return 1.0
+    
+    # Linear interpolation from 0.1 (size=1) to 1.0 (size=min_size)
+    penalty = 0.1 + 0.9 * (tree_size - 1) / (min_size - 1)
+    return max(0.1, penalty)
+
+
+def compute_drawdown_penalty(dd_pct: float, threshold: float = 50.0) -> float:
+    """
+    Graduated penalty for drawdown.
+    
+    Instead of hard rejection when dd < -threshold, apply increasing penalty.
+    
+    Returns a penalty multiplier for the fitness.
+    """
+    if dd_pct >= -threshold:
+        return 1.0
+    
+    # Exponential penalty for excessive drawdown
+    excess = abs(dd_pct) - threshold
+    penalty = math.exp(-excess / 20.0)  # Decays by ~half every 14% extra DD
+    return max(0.1, penalty)
+
+
+def compute_consistency_penalty(train_fit: float, val_fit: float) -> float:
+    """
+    Penalty for train/val inconsistency (overfitting indicator).
+    
+    Instead of hard rejection, reduce fitness when val << train.
+    """
+    if train_fit <= EPSILON:
+        return 0.5
+    
+    ratio = val_fit / train_fit
+    
+    if ratio >= 0.5:
+        return 1.0  # Good consistency
+    elif ratio >= 0.3:
+        return 0.8  # Moderate overfitting
+    elif ratio >= 0.1:
+        return 0.5  # Significant overfitting
+    else:
+        return 0.2  # Severe overfitting
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# FULL EVALUATION PIPELINE (called by GP engine)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Minimum tree size to avoid degenerate formulas (relaxed for early generations)
+MIN_TREE_LENGTH_BASE = 5
 
 # Reject unrealistic returns (likely overfitting)
 MAX_RETURN_CAP = 500.0  # percent
@@ -163,19 +219,21 @@ def evaluate_individual(
     val_data: Dict[str, Tuple[np.ndarray, np.ndarray]] = None,
     train_feature_matrices: Dict[str, np.ndarray] = None,
     cfg: GPConfig = None,
+    generation: int = 0,
 ) -> Tuple[float, ...]:
     """
     Full fitness evaluation pipeline for one GP individual.
 
-    Multi-stage filter approach (from reference script):
-    F0: Tree complexity check
-    F0b: Signal diversity check
-    F1: Train backtest — minimum activity
-    F2: Train drawdown filter
-    F3: Both train and val must be positive return
-    F4: Val backtest — Sharpe filter
-    F5: Composite fitness with multi-stock aggregation
-
+    REVISED APPROACH: Graduated penalties with phased difficulty.
+    
+    The evaluation applies soft penalties instead of hard rejection,
+    allowing selection pressure to operate even on imperfect individuals.
+    
+    Phased difficulty:
+    - Generations 0-4: Only basic checks, allow any tree with trades
+    - Generations 5-9: Add drawdown and consistency checks
+    - Generations 10+: Full multi-stock validation
+    
     Parameters
     ----------
     individual : DEAP GP individual
@@ -190,40 +248,57 @@ def evaluate_individual(
         {symbol: feature_matrix} for signal diversity check (train only).
     cfg : GPConfig
         Configuration.
+    generation : int
+        Current generation number (for phased difficulty).
 
     Returns
     -------
     tuple of float
         (fitness,) — single-objective.
     """
-    FAIL = (-100.0,)
+    BASE_FAIL = -50.0  # Better than -100, allows some selection pressure
 
     if cfg is None:
         cfg = DEFAULT_GP_CONFIG
+    
+    # Get generation from toolbox if not explicitly passed
+    if generation == 0 and toolbox is not None and hasattr(toolbox, 'current_generation'):
+        generation = toolbox.current_generation
 
     try:
-        # ── F0: Minimum tree complexity ────────────────────────────────
-        if len(individual) < MIN_TREE_LENGTH:
-            return FAIL
-
-        # ── Compile tree ───────────────────────────────────────────────
+        # ── Compile tree ───────────────────────────────────────────────────────
         if toolbox is None:
-            return FAIL
+            return (BASE_FAIL,)
         func = toolbox.compile(expr=individual)
 
-        # ── F0b: Signal diversity check ────────────────────────────────
-        # Check on first available stock's training data
-        if train_feature_matrices:
+        tree_size = len(individual)
+        
+        # ── Phase-dependent minimum tree size ─────────────────────────────────
+        # Early generations: allow smaller trees
+        min_tree = MIN_TREE_LENGTH_BASE if generation < 5 else 7
+        tree_penalty = compute_tree_penalty(tree_size, min_tree)
+        
+        # ── Signal diversity check (soft) ─────────────────────────────────────
+        diversity_ok = True
+        if train_feature_matrices and generation >= 3:
             first_sym = next(iter(train_feature_matrices))
             fm = train_feature_matrices[first_sym]
-            if not check_signal_diversity(func, fm, n_samples=500):
-                return FAIL
+            diversity_ok = check_signal_diversity(func, fm, n_samples=500)
+        
+        diversity_penalty = 1.0 if diversity_ok else 0.7
 
-        # ── Per-stock evaluation ───────────────────────────────────────
+        # ── Per-stock evaluation ───────────────────────────────────────────────
         if train_data is None or val_data is None:
-            return FAIL
+            return (BASE_FAIL,)
 
         per_stock_fitness = {}
+        per_stock_details = {}  # For debugging
+        
+        # Count how many stocks pass various filters
+        stocks_with_trades = 0
+        stocks_positive_train = 0
+        stocks_positive_val = 0
+        stocks_positive_both = 0
 
         for symbol in train_data:
             if symbol not in val_data:
@@ -232,80 +307,96 @@ def evaluate_individual(
             train_features, train_prices = train_data[symbol]
             val_features, val_prices = val_data[symbol]
 
-            # ── Stage 1: Train backtest ────────────────────────────────
+            # ── Stage 1: Train backtest ───────────────────────────────────────
             train_result = backtest_stock(func, train_features, train_prices, cfg)
 
-            # ── F1: Minimum activity ───────────────────────────────────
-            if train_result.n_trades < cfg.min_trades:
-                continue  # Skip this stock, not reject entirely
-
-            # ── F2: Train drawdown ─────────────────────────────────────
-            if train_result.max_drawdown_pct < -cfg.max_drawdown_pct:
+            # Skip if no trades at all (dead individual)
+            if train_result.n_trades < 2:
                 continue
+            
+            stocks_with_trades += 1
 
-            # ── Stage 2: Val backtest ──────────────────────────────────
+            # ── Stage 2: Val backtest ───────────────────────────────────────────
             val_result = backtest_stock(func, val_features, val_prices, cfg)
 
-            # ── F3: Both positive return ───────────────────────────────
-            if train_result.total_return_pct <= 0.0:
-                continue
-            if val_result.total_return_pct <= 0.0:
-                continue
+            # Track statistics
+            if train_result.total_return_pct > 0:
+                stocks_positive_train += 1
+            if val_result.total_return_pct > 0:
+                stocks_positive_val += 1
+            if train_result.total_return_pct > 0 and val_result.total_return_pct > 0:
+                stocks_positive_both += 1
 
-            # ── F3b: Reject unrealistically high returns ───────────────
+            # ── Compute fitness with graduated penalties ───────────────────────
+            train_fit = composite_fitness(train_result, tree_size, cfg)
+            val_fit = composite_fitness(val_result, tree_size, cfg)
+            
+            # Apply drawdown penalty
+            dd_penalty = compute_drawdown_penalty(train_result.max_drawdown_pct, 
+                                                   cfg.max_drawdown_pct)
+            
+            # Apply consistency penalty
+            consistency_penalty = compute_consistency_penalty(train_fit, val_fit)
+            
+            # Combined penalty
+            total_penalty = tree_penalty * diversity_penalty * dd_penalty * consistency_penalty
+            
+            # Final stock fitness
+            stock_fitness = val_fit * total_penalty
+            
+            # Bonus for positive returns on both splits
+            if train_result.total_return_pct > 0 and val_result.total_return_pct > 0:
+                stock_fitness += 0.5  # Small bonus
+            
+            # Cap unrealistic returns
             if train_result.total_return_pct > MAX_RETURN_CAP:
-                continue
+                stock_fitness *= 0.5
             if val_result.total_return_pct > MAX_RETURN_CAP:
-                continue
-
-            # ── F4: Val Sharpe filter ──────────────────────────────────
-            if val_result.sharpe_ratio < 0.0:
-                continue
-
-            # ── F5: Composite fitness for this stock ───────────────────
-            # Use validation result for fitness (reduces overfitting)
-            stock_fitness = composite_fitness(
-                val_result, len(individual), cfg
-            )
-
-            # Consistency bonus: penalise large train-val gap
-            train_fit = composite_fitness(
-                train_result, len(individual), cfg
-            )
-            if train_fit > EPSILON:
-                consistency = stock_fitness / train_fit
-                # If val fitness < 30% of train → likely overfit
-                if consistency < 0.3:
-                    stock_fitness *= 0.5
+                stock_fitness *= 0.5
 
             per_stock_fitness[symbol] = stock_fitness
+            per_stock_details[symbol] = {
+                'train_return': train_result.total_return_pct,
+                'val_return': val_result.total_return_pct,
+                'train_sharpe': train_result.sharpe_ratio,
+                'val_sharpe': val_result.sharpe_ratio,
+                'n_trades': train_result.n_trades,
+                'fitness': stock_fitness,
+            }
 
-        # ── Must pass at least 2 stocks (for multi-stock robustness) ───
-        if len(per_stock_fitness) < 2:
-            return FAIL
+        # ── Multi-stock aggregation with phased requirements ───────────────────
+        n_stocks_required = 1 if generation < 10 else 2
+        
+        if len(per_stock_fitness) < n_stocks_required:
+            # Not enough stocks passed - return partial fitness
+            if len(per_stock_fitness) == 0:
+                return (BASE_FAIL - 10,)
+            else:
+                # Partial credit for at least trying
+                partial_fit = np.mean(list(per_stock_fitness.values())) * 0.5
+                return (partial_fit,)
 
-        # ── Multi-stock aggregation ────────────────────────────────────
+        # ── Multi-stock aggregation ─────────────────────────────────────────────
         total_fitness = multi_stock_fitness(per_stock_fitness, cfg)
 
-        # ── Complexity penalty bonus for very small trees ──────────────
-        tree_len = len(individual)
-        if tree_len < 10:
-            total_fitness *= 0.5
-        elif tree_len < 15:
-            total_fitness *= 0.8
-
-        # ── Cap ────────────────────────────────────────────────────────
+        # ── Generation-based bonus ─────────────────────────────────────────────
+        # Encourage diversity in early generations
+        if generation < 5:
+            # Bonus for evaluating multiple stocks (even if not all positive)
+            total_fitness += 0.1 * len(per_stock_fitness)
+        
+        # ── Cap ─────────────────────────────────────────────────────────────────
         total_fitness = min(total_fitness, 500.0)
 
         return (total_fitness,)
 
-    except Exception:
-        return FAIL
+    except Exception as e:
+        return (BASE_FAIL,)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 # PREPARE EVALUATION DATA
-# ═══════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def prepare_eval_data(
     df: "pd.DataFrame",
@@ -337,7 +428,7 @@ def prepare_eval_data(
         raise ValueError(f"Missing feature columns: {missing}")
 
     feature_matrix = df[feature_names].values.astype(np.float64)
-    close_prices = df["close"].values.astype(np.float64)
+    close_prices = df["Close"].values.astype(np.float64)
 
     # Replace NaN with 0 in features
     feature_matrix = np.nan_to_num(feature_matrix, nan=0.0, posinf=0.0, neginf=0.0)
