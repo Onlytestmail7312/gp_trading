@@ -474,7 +474,7 @@ def _evolution_loop(
                 try:
                     # Store current generation on toolbox for fitness function to access
                     toolbox.current_generation = gen
-                    fitnesses = list(map(toolbox.evaluate, chunk))
+                    fitnesses = list(toolbox.map(toolbox.evaluate, chunk))
                     for ind, fit in zip(chunk, fitnesses):
                         ind.fitness.values = fit
                 except Exception as exc:
