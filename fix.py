@@ -1,14 +1,40 @@
-content = open('gp_engine.py', encoding='utf-8').read()
+content = open('backtest_all_stocks.py', encoding='utf-8').read()
 
-old = 'EarlyStopping(patience=5, min_delta=0.01)'
-new = 'EarlyStopping(patience=GP_EARLY_STOP, min_delta=0.01)'
+old = '''            if curr_regime == 1 and prev_sig <= 0 and curr_sig > 0:
+                in_trade    = True
+                direction   = 1
+                entry_day   = i
+                entry_price = price * (1 + COST)
+                peak_price  = entry_price
+
+            elif curr_regime == -1 and prev_sig >= 0 and curr_sig < 0:
+                in_trade    = True
+                direction   = -1
+                entry_day   = i
+                entry_price = price * (1 - COST)
+                peak_price  = entry_price'''
+
+new = '''            if curr_regime == 1 and prev_sig <= 0 and curr_sig > 0:
+                in_trade    = True
+                direction   = 1
+                entry_day   = i
+                entry_price = price * (1 + COST)
+                entry_sig   = curr_sig
+                peak_price  = entry_price
+
+            elif curr_regime == -1 and prev_sig >= 0 and curr_sig < 0:
+                in_trade    = True
+                direction   = -1
+                entry_day   = i
+                entry_price = price * (1 - COST)
+                entry_sig   = curr_sig
+                peak_price  = entry_price'''
 
 if old in content:
     content = content.replace(old, new)
-    open('gp_engine.py', 'w', encoding='utf-8').write(content)
-    print('Fixed -- now uses GP_EARLY_STOP =', end=' ')
-    import re
-    val = re.findall(r'GP_EARLY_STOP\s*=\s*\d+', open('config.py').read())
-    print(val)
+    open('backtest_all_stocks.py', 'w', encoding='utf-8').write(content)
+    print('Fixed -- entry_sig now set at entry point')
 else:
     print('Pattern not found')
+    idx = content.find('if curr_regime == 1 and prev_sig')
+    print(repr(content[idx:idx+300]))

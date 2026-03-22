@@ -84,6 +84,9 @@ def backtest_single_stock(
     max_hold: int = MAX_HOLD_DAYS,
     cost_pct: float = TOTAL_COST_PCT,
     regime: Optional[np.ndarray] = None,
+    stop_loss_pct: float = 0.05,
+    trailing_stop_pct: float = 0.07,
+    signal_threshold: float = 0.0,
 ) -> BacktestResult:
     n      = len(signal)
     trades = []
@@ -97,6 +100,7 @@ def backtest_single_stock(
     entry_day   = 0
     entry_price = 0.0
     entry_sig   = 0.0
+    peak_price  = 0.0
 
     for i in range(1, n):
         prev_sig    = signal[i - 1]
@@ -114,6 +118,7 @@ def backtest_single_stock(
                     entry_day   = i
                     entry_price = price * (1 + cost_pct)
                     entry_sig   = curr_sig
+                    peak_price  = entry_price
 
             # Bear regime: only take SHORT signals
             elif curr_regime == -1:
@@ -123,31 +128,74 @@ def backtest_single_stock(
                     entry_day   = i
                     entry_price = price * (1 - cost_pct)
                     entry_sig   = curr_sig
+                    peak_price  = entry_price
 
         else:
             exit_signal = False
+            exit_price  = price
 
-            if hold >= min_hold:
+            # Update peak price for trailing stop
+            if direction == 1:
+                peak_price = max(peak_price, price)
+            else:
+                peak_price = min(peak_price, price)
+
+            # Hard stop loss
+            if direction == 1:
+                stop_price = entry_price * (1 - stop_loss_pct)
+                if price <= stop_price:
+                    exit_signal = True
+                    exit_price  = stop_price  # exit at stop price
+
+            elif direction == -1:
+                stop_price = entry_price * (1 + stop_loss_pct)
+                if price >= stop_price:
+                    exit_signal = True
+                    exit_price  = stop_price
+
+            # Trailing stop loss
+            if not exit_signal:
+                if direction == 1:
+                    trail_stop = peak_price * (1 - trailing_stop_pct)
+                    if price <= trail_stop:
+                        exit_signal = True
+                        exit_price  = trail_stop
+
+                elif direction == -1:
+                    trail_stop = peak_price * (1 + trailing_stop_pct)
+                    if price >= trail_stop:
+                        exit_signal = True
+                        exit_price  = trail_stop
+
+            # Signal exit
+            if not exit_signal and hold >= min_hold:
                 if direction == 1 and curr_sig <= 0:
                     exit_signal = True
+                    exit_price  = price
                 elif direction == -1 and curr_sig >= 0:
                     exit_signal = True
+                    exit_price  = price
 
             # Force exit if regime flips against position
-            if direction == 1 and curr_regime == -1:
-                exit_signal = True
-            elif direction == -1 and curr_regime == 1:
-                exit_signal = True
+            if not exit_signal:
+                if direction == 1 and curr_regime == -1:
+                    exit_signal = True
+                    exit_price  = price
+                elif direction == -1 and curr_regime == 1:
+                    exit_signal = True
+                    exit_price  = price
 
+            # Max hold exit
             if hold >= max_hold:
                 exit_signal = True
+                exit_price  = price
 
             if exit_signal:
                 if direction == 1:
-                    exit_price   = price * (1 - cost_pct)
+                    exit_price   = exit_price * (1 - cost_pct)
                     gross_return = (exit_price / entry_price) - 1
                 else:
-                    exit_price   = price * (1 + cost_pct)
+                    exit_price   = exit_price * (1 + cost_pct)
                     gross_return = (entry_price / exit_price) - 1
 
                 trades.append(Trade(
@@ -163,7 +211,8 @@ def backtest_single_stock(
                     net_return   = gross_return,
                     signal_entry = entry_sig,
                 ))
-                in_trade = False
+                in_trade   = False
+                peak_price = 0.0
 
     # Close open trade at end
     if in_trade and len(prices) > 0:
@@ -275,6 +324,7 @@ def backtest_portfolio(
     max_hold: int = MAX_HOLD_DAYS,
     cost_pct: float = TOTAL_COST_PCT,
     use_regime_filter: bool = True,
+    signal_threshold: float = 0.0,
 ) -> Dict[str, BacktestResult]:
     results = {}
 
@@ -289,6 +339,7 @@ def backtest_portfolio(
                 signal, prices, symbol,
                 min_hold, max_hold, cost_pct,
                 regime=regime,
+                signal_threshold=signal_threshold,
             )
             results[symbol] = result
         except Exception:

@@ -86,6 +86,8 @@ TOTAL_CAPITAL       = 1_000_000.0
 # Transaction costs
 COMMISSION_PCT  = 0.0003
 SLIPPAGE_PCT    = 0.0002
+STOP_LOSS_PCT      = 0.05   # 5% hard stop loss
+TRAILING_STOP_PCT  = 0.07   # 7% trailing stop
 TOTAL_COST_PCT  = COMMISSION_PCT + SLIPPAGE_PCT
 
 # ============================================================================

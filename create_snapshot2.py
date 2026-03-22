@@ -11,7 +11,7 @@ RESEARCH_DB = "gp_research.duckdb"
 TARGET_STOCK = "ICICIBANK"
 INDEX = "NIFTY"
 # These match the validation_stocks in your Ninja script
-VALIDATION_STOCKS = ["HDFCBANK", "RELIANCE", "TCS", "INFY", "WIPRO"]
+VALIDATION_STOCKS = ["HDFCBANK", "RELIANCE", "TCS", "INFY", "WIPRO", "BHARTIARTL", "IDEA", "HINDUNILVR", "SBIN", "SUNPHARMA"]
 
 # Combine into one unique list
 ALL_SYMBOLS = list(set([TARGET_STOCK, INDEX] + VALIDATION_STOCKS))
