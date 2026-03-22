@@ -93,17 +93,17 @@ TOTAL_COST_PCT  = COMMISSION_PCT + SLIPPAGE_PCT
 # ============================================================================
 # GP PARAMETERS
 # ============================================================================
-GP_POPULATION    = 5000
-GP_GENERATIONS   = 60
-GP_CROSSOVER     = 0.75
-GP_MUTATION      = 0.15
-GP_ELITE         = 30
-GP_TOURNAMENT    = 7
+GP_POPULATION    = 7000
+GP_GENERATIONS   = 80
+GP_CROSSOVER     = 0.80
+GP_MUTATION      = 0.12
+GP_ELITE         = 40
+GP_TOURNAMENT    = 9
 GP_MIN_DEPTH     = 2
-GP_MAX_DEPTH     = 8
-GP_MAX_NODES     = 50
-GP_EARLY_STOP    = 20
-GP_CHUNK_SIZE    = 300
+GP_MAX_DEPTH     = 7
+GP_MAX_NODES     = 40
+GP_EARLY_STOP    = 25
+GP_CHUNK_SIZE    = 350
 GP_WORKERS       = 8
 
 # ============================================================================
