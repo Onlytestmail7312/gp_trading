@@ -35,7 +35,7 @@ def main():
     t0 = time.time()
     print_banner("GP POSITIONAL TRADING -- EVOLUTION")
 
-    df = load_features(Path("gp_output/gp_features_daily.parquet"))
+    df = load_features(Path("gp_output/gp_features_daily2.parquet"))
 
     train_df, val_df, test_df = split_dataset(df)
 

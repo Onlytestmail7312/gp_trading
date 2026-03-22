@@ -103,7 +103,7 @@ def prepare_stock_data(
 
 def save_features(df: pd.DataFrame, path: Optional[Path] = None) -> Path:
     if path is None:
-        path = OUTPUT_DIR / "gp_features_daily.parquet"
+        path = OUTPUT_DIR / "gp_features_daily2.parquet"
     path.parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(str(path))
     size_mb = path.stat().st_size / 1e6
@@ -113,7 +113,7 @@ def save_features(df: pd.DataFrame, path: Optional[Path] = None) -> Path:
 
 def load_features(path: Optional[Path] = None) -> pd.DataFrame:
     if path is None:
-        path = OUTPUT_DIR / "gp_features_daily.parquet"
+        path = OUTPUT_DIR / "gp_features_daily2.parquet"
     if not path.exists():
         raise FileNotFoundError(f"Feature file not found: {path}")
     df = pd.read_parquet(str(path))

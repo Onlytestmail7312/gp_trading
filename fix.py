@@ -1,18 +1,13 @@
-content = open('main_train_gp.py', encoding='utf-8').read()
+content = open('config.py', encoding='utf-8').read()
 
-old = 'log = get_logger()\n\n\ndef main():'
-new = 'def main():'
+old = 'DB_PATH    = BASE_DIR / "gp_research.duckdb"'
+new = 'DB_PATH    = BASE_DIR / "gp_output/gp_snapshot2.duckdb"'
 
 if old in content:
     content = content.replace(old, new)
-    # Add log inside main after seed setup
-    content = content.replace(
-        '    np.random.seed(args.seed)',
-        '    np.random.seed(args.seed)\n    log = get_logger()'
-    )
-    open('main_train_gp.py', 'w', encoding='utf-8').write(content)
-    print('Fixed')
+    open('config.py', 'w', encoding='utf-8').write(content)
+    print('Fixed DB_PATH')
 else:
-    print('Pattern not found')
-    idx = content.find('log = get_logger')
-    print(repr(content[idx-20:idx+100]))
+    print('NOT FOUND')
+    idx = content.find('DB_PATH')
+    print(repr(content[idx:idx+100]))

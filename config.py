@@ -17,7 +17,7 @@ import numpy as np
 # PATHS
 # ============================================================================
 BASE_DIR   = Path(__file__).parent
-DB_PATH    = BASE_DIR / "gp_research.duckdb"
+DB_PATH    = BASE_DIR / "gp_output/gp_snapshot2.duckdb"
 OUTPUT_DIR = BASE_DIR / "gp_output"
 
 # ============================================================================
@@ -30,42 +30,43 @@ BARS_PER_DAY   = 375   # 1-minute bars per trading day
 # ============================================================================
 # TIME SPLITS
 # ============================================================================
-TRAIN_START = "2021-08-16"
-TRAIN_END   = "2023-12-31"
-VAL_START   = "2024-01-01"
-VAL_END     = "2024-12-31"
-TEST_START  = "2025-01-01"
+TRAIN_START = "2015-01-01"
+TRAIN_END   = "2022-12-31"
+VAL_START   = "2023-01-01"
+VAL_END     = "2023-12-31"
+TEST_START  = "2024-01-01"
 
 # ============================================================================
 # DAILY FEATURE LIST  (GP terminals)
 # ============================================================================
 DAILY_FEATURES = [
-    # Price returns
-    "ret_1d",
-    "ret_5d",
-    "ret_10d",
-    "ret_20d",
-    # Trend
-    "close_vs_sma10",
-    "close_vs_sma20",
-    "close_vs_sma50",
-    "close_vs_sma200",
-    # Momentum
-    "rsi_14",
-    "macd_signal",
-    "macd_hist",
-    # Volatility
-    "atr_pct_14",
-    "bb_pct",
+    # Returns
+    "ret_1d", "ret_3d", "ret_5d", "ret_10d", "ret_20d",
+    # SMA ratios
+    "close_vs_sma5", "close_vs_sma10", "close_vs_sma20",
+    "close_vs_sma50", "close_vs_sma200",
+    # MACD
+    "macd",
+    # RSI
+    "rsi_7", "rsi_14", "rsi_21",
+    # Bollinger Bands
+    "bb_upper_20", "bb_lower_20", "bb_width_20", "bb_pos_20",
+    # ATR
+    "atr_pct_7", "atr_pct_14",
     # Volume
-    "volume_rel_20",
-    # Market (Nifty)
-    "nifty_ret_5d",
-    "nifty_ret_20d",
-    "nifty_vs_sma50",
-    # Relative strength vs Nifty
-    "rs_5d",
-    "rs_20d",
+    "vol_ratio", "vol_ret",
+    # Momentum
+    "mom_5", "mom_10", "mom_20",
+    # High/Low
+    "pct_from_high20", "pct_from_low20",
+    "pct_from_high52w", "pct_from_low52w",
+    # Candle
+    "body", "upper_wick", "lower_wick",
+    # Volatility
+    "vol_20d", "vol_60d",
+    # Nifty
+    "nifty_ret_1d", "nifty_ret_5d", "nifty_ret_20d",
+    "nifty_vs_sma20", "nifty_rsi14", "rel_strength",
 ]
 
 N_FEATURES = len(DAILY_FEATURES)
@@ -93,16 +94,16 @@ TOTAL_COST_PCT  = COMMISSION_PCT + SLIPPAGE_PCT
 # ============================================================================
 # GP PARAMETERS
 # ============================================================================
-GP_POPULATION    = 7000
-GP_GENERATIONS   = 80
-GP_CROSSOVER     = 0.80
-GP_MUTATION      = 0.12
-GP_ELITE         = 40
-GP_TOURNAMENT    = 9
+GP_POPULATION    = 8000
+GP_GENERATIONS   = 100
+GP_CROSSOVER     = 0.75
+GP_MUTATION      = 0.15
+GP_ELITE         = 50
+GP_TOURNAMENT    = 7
 GP_MIN_DEPTH     = 2
 GP_MAX_DEPTH     = 7
 GP_MAX_NODES     = 40
-GP_EARLY_STOP    = 25
+GP_EARLY_STOP    = 30
 GP_CHUNK_SIZE    = 350
 GP_WORKERS       = 8
 
