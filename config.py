@@ -73,7 +73,7 @@ N_FEATURES = len(DAILY_FEATURES)
 # ============================================================================
 # POSITIONAL TRADING RULES
 # ============================================================================
-MIN_HOLD_DAYS   = 3
+MIN_HOLD_DAYS   = 5
 MAX_HOLD_DAYS   = 60
 ENTRY_THRESHOLD = 0.0
 EXIT_THRESHOLD  = 0.0
@@ -93,11 +93,11 @@ TOTAL_COST_PCT  = COMMISSION_PCT + SLIPPAGE_PCT
 # ============================================================================
 # GP PARAMETERS
 # ============================================================================
-GP_POPULATION    = 3000
-GP_GENERATIONS   = 50
+GP_POPULATION    = 5000
+GP_GENERATIONS   = 60
 GP_CROSSOVER     = 0.75
 GP_MUTATION      = 0.15
-GP_ELITE         = 20
+GP_ELITE         = 30
 GP_TOURNAMENT    = 7
 GP_MIN_DEPTH     = 2
 GP_MAX_DEPTH     = 8

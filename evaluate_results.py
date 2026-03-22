@@ -24,6 +24,14 @@ def load_best_model(path="gp_output/best_model.pkl"):
     setup_gp_toolbox(feature_names=DAILY_FEATURES)
     with open(path, "rb") as f:
         data = dill.load(f)
+    # Verify formula compiles
+    try:
+        toolbox, _ = setup_gp_toolbox(feature_names=DAILY_FEATURES)
+        toolbox.compile(expr=data["individual"])
+        print(f"  Formula compiles OK")
+    except Exception as e:
+        print(f"  WARNING: Formula compile error: {e}")
+        print(f"  Model may use primitives no longer registered")
     return data
 
 

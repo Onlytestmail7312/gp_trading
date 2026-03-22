@@ -209,7 +209,8 @@ def build_primitive_set(feature_names: List[str] = None) -> gp.PrimitiveSetTyped
     pset.addPrimitive(safe_min, 2, name="min")
 
     # Unary (arity=1)
-    pset.addPrimitive(safe_abs, 1, name="abs")
+    # NOTE: abs() removed intentionally -- forces GP to generate
+    # both positive (long) and negative (short) signals naturally
     pset.addPrimitive(safe_neg, 1, name="neg")
     pset.addPrimitive(safe_exp, 1, name="exp")
     pset.addPrimitive(safe_log, 1, name="log")

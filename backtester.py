@@ -87,6 +87,7 @@ def backtest_single_stock(
     stop_loss_pct: float = 0.05,
     trailing_stop_pct: float = 0.07,
     signal_threshold: float = 0.0,
+    opens: Optional[np.ndarray] = None,
 ) -> BacktestResult:
     n      = len(signal)
     trades = []
@@ -112,21 +113,24 @@ def backtest_single_stock(
         if not in_trade:
             # Bull regime: only take LONG signals
             if curr_regime == 1:
-                if prev_sig <= 0 and curr_sig > 0:
+                if prev_sig <= 0 and curr_sig > 0 and curr_sig >= signal_threshold:
+                    # Use next day open for realistic execution
+                    next_open   = opens[i+1] if (opens is not None and i+1 < len(opens)) else price
                     in_trade    = True
                     direction   = 1
                     entry_day   = i
-                    entry_price = price * (1 + cost_pct)
+                    entry_price = next_open * (1 + cost_pct)
                     entry_sig   = curr_sig
                     peak_price  = entry_price
 
             # Bear regime: only take SHORT signals
             elif curr_regime == -1:
-                if prev_sig >= 0 and curr_sig < 0:
+                if prev_sig >= 0 and curr_sig < 0 and abs(curr_sig) >= signal_threshold:
+                    next_open   = opens[i+1] if (opens is not None and i+1 < len(opens)) else price
                     in_trade    = True
                     direction   = -1
                     entry_day   = i
-                    entry_price = price * (1 - cost_pct)
+                    entry_price = next_open * (1 - cost_pct)
                     entry_sig   = curr_sig
                     peak_price  = entry_price
 
@@ -328,8 +332,15 @@ def backtest_portfolio(
 ) -> Dict[str, BacktestResult]:
     results = {}
 
-    for symbol, (features, prices) in stock_data.items():
+    for symbol, stock_tuple in stock_data.items():
         try:
+            # Support both (features, prices) and (features, prices, opens)
+            if len(stock_tuple) == 3:
+                features, prices, opens = stock_tuple
+            else:
+                features, prices = stock_tuple
+                opens = None
+
             signal = generate_signal(func, features)
 
             # Get Nifty regime filter
@@ -340,6 +351,7 @@ def backtest_portfolio(
                 min_hold, max_hold, cost_pct,
                 regime=regime,
                 signal_threshold=signal_threshold,
+                opens=opens,
             )
             results[symbol] = result
         except Exception:

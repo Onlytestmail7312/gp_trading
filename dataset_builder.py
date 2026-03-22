@@ -93,8 +93,9 @@ def prepare_stock_data(
             continue
         features = sym_df[DAILY_FEATURES].values.astype(np.float64)
         prices   = sym_df["close"].values.astype(np.float64)
+        opens    = sym_df["open"].values.astype(np.float64)
         features = np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
-        result[sym] = (features, prices)
+        result[sym] = (features, prices, opens)
         log.info(f"  {sym}: {len(sym_df)} daily bars ready")
 
     return result
