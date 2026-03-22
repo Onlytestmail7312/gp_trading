@@ -54,6 +54,10 @@ def get_logger(name: str = "gp_system") -> logging.Logger:
 
     logger = logging.getLogger(name)
     logger.setLevel(logging.DEBUG)
+    # Prevent duplicate handlers if logger already exists
+    if logger.handlers:
+        _loggers[name] = logger
+        return _loggers[name]
 
     # Console handler
     ch = logging.StreamHandler(sys.stdout)

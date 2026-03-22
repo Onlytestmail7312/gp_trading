@@ -23,9 +23,6 @@ from dataset_builder import load_features, split_dataset, prepare_stock_data
 from gp_engine import run_evolution
 from config import OUTPUT_DIR, ALL_SYMBOLS
 
-log = get_logger()
-
-
 def main():
     # Parse CLI arguments for reproducibility
     parser = argparse.ArgumentParser(description="GP Trading System Trainer")
@@ -33,6 +30,7 @@ def main():
     args, _ = parser.parse_known_args()
     random.seed(args.seed)
     np.random.seed(args.seed)
+    log = get_logger()
 
     t0 = time.time()
     print_banner("GP POSITIONAL TRADING -- EVOLUTION")
