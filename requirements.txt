@@ -1,0 +1,21 @@
+# GP Trading — Python Dependencies
+# Install with: pip install -r requirements.txt
+
+# Evolutionary computation framework
+deap>=1.4.1
+
+# Serialisation (supports lambda/closure pickling for DEAP individuals)
+dill>=0.3.7
+
+# Columnar database for 1-minute OHLCV data
+duckdb>=0.10.0
+
+# Data manipulation
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Parquet file support (feature dataset I/O)
+pyarrow>=14.0.0
+
+# Visualisation (equity curves, trade distributions)
+matplotlib>=3.7.0
