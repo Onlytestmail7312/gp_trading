@@ -1,16 +1,16 @@
 """
-backtester.py -- positional long/short backtester.
+backtester.py -- positional long/short backtester with Nifty regime filter.
 """
 
 from __future__ import annotations
 
 import numpy as np
 from dataclasses import dataclass
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 
 from config import (
     MIN_HOLD_DAYS, MAX_HOLD_DAYS,
-    TOTAL_COST_PCT, EPSILON,
+    TOTAL_COST_PCT, EPSILON, DAILY_FEATURES,
 )
 
 
@@ -49,7 +49,6 @@ class BacktestResult:
 def generate_signal(func, feature_matrix: np.ndarray) -> np.ndarray:
     n = feature_matrix.shape[0]
     signal = np.zeros(n)
-
     for i in range(n):
         row = feature_matrix[i]
         try:
@@ -57,8 +56,24 @@ def generate_signal(func, feature_matrix: np.ndarray) -> np.ndarray:
             signal[i] = float(val) if np.isfinite(val) else 0.0
         except Exception:
             signal[i] = 0.0
-
     return signal
+
+
+def get_nifty_regime(feature_matrix: np.ndarray) -> np.ndarray:
+    """
+    Extract Nifty regime from feature matrix.
+    Returns array of +1 (bull) or -1 (bear) for each day.
+    nifty_vs_sma50 > 0 means Nifty above 50-day SMA = bull regime
+    nifty_vs_sma50 < 0 means Nifty below 50-day SMA = bear regime
+    """
+    try:
+        nifty_col = DAILY_FEATURES.index("nifty_vs_sma50")
+        nifty_vs_sma = feature_matrix[:, nifty_col]
+        regime = np.where(nifty_vs_sma >= 0, 1, -1)
+        return regime
+    except (ValueError, IndexError):
+        # nifty_vs_sma50 not in features -- no filter
+        return np.ones(feature_matrix.shape[0], dtype=int)
 
 
 def backtest_single_stock(
@@ -68,9 +83,14 @@ def backtest_single_stock(
     min_hold: int = MIN_HOLD_DAYS,
     max_hold: int = MAX_HOLD_DAYS,
     cost_pct: float = TOTAL_COST_PCT,
+    regime: Optional[np.ndarray] = None,
 ) -> BacktestResult:
     n      = len(signal)
     trades = []
+
+    # Default regime = all bull (allow longs only) if not provided
+    if regime is None:
+        regime = np.ones(n, dtype=int)
 
     in_trade    = False
     direction   = 0
@@ -79,31 +99,45 @@ def backtest_single_stock(
     entry_sig   = 0.0
 
     for i in range(1, n):
-        prev_sig = signal[i - 1]
-        curr_sig = signal[i]
-        price    = prices[i]
-        hold     = i - entry_day
+        prev_sig    = signal[i - 1]
+        curr_sig    = signal[i]
+        price       = prices[i]
+        hold        = i - entry_day
+        curr_regime = regime[i]  # +1 = bull, -1 = bear
 
         if not in_trade:
-            if prev_sig <= 0 and curr_sig > 0:
-                in_trade    = True
-                direction   = 1
-                entry_day   = i
-                entry_price = price * (1 + cost_pct)
-                entry_sig   = curr_sig
-            elif prev_sig >= 0 and curr_sig < 0:
-                in_trade    = True
-                direction   = -1
-                entry_day   = i
-                entry_price = price * (1 - cost_pct)
-                entry_sig   = curr_sig
+            # Bull regime: only take LONG signals
+            if curr_regime == 1:
+                if prev_sig <= 0 and curr_sig > 0:
+                    in_trade    = True
+                    direction   = 1
+                    entry_day   = i
+                    entry_price = price * (1 + cost_pct)
+                    entry_sig   = curr_sig
+
+            # Bear regime: only take SHORT signals
+            elif curr_regime == -1:
+                if prev_sig >= 0 and curr_sig < 0:
+                    in_trade    = True
+                    direction   = -1
+                    entry_day   = i
+                    entry_price = price * (1 - cost_pct)
+                    entry_sig   = curr_sig
+
         else:
             exit_signal = False
+
             if hold >= min_hold:
                 if direction == 1 and curr_sig <= 0:
                     exit_signal = True
                 elif direction == -1 and curr_sig >= 0:
                     exit_signal = True
+
+            # Force exit if regime flips against position
+            if direction == 1 and curr_regime == -1:
+                exit_signal = True
+            elif direction == -1 and curr_regime == 1:
+                exit_signal = True
 
             if hold >= max_hold:
                 exit_signal = True
@@ -131,6 +165,7 @@ def backtest_single_stock(
                 ))
                 in_trade = False
 
+    # Close open trade at end
     if in_trade and len(prices) > 0:
         i     = n - 1
         price = prices[i]
@@ -208,12 +243,12 @@ def _compute_metrics(
     else:
         sortino = 0.0
 
-    peak = np.maximum.accumulate(equity)
-    dd   = (equity - peak) / (peak + EPSILON)
+    peak   = np.maximum.accumulate(equity)
+    dd     = (equity - peak) / (peak + EPSILON)
     max_dd = dd.min() * 100.0
 
-    gross_wins   = returns[wins].sum() if wins.any() else 0.0
-    gross_losses = -returns[~wins].sum() if (~wins).any() else EPSILON
+    gross_wins    = returns[wins].sum()   if wins.any()  else 0.0
+    gross_losses  = -returns[~wins].sum() if (~wins).any() else EPSILON
     profit_factor = gross_wins / max(gross_losses, EPSILON)
 
     return BacktestResult(
@@ -239,13 +274,22 @@ def backtest_portfolio(
     min_hold: int = MIN_HOLD_DAYS,
     max_hold: int = MAX_HOLD_DAYS,
     cost_pct: float = TOTAL_COST_PCT,
+    use_regime_filter: bool = True,
 ) -> Dict[str, BacktestResult]:
     results = {}
 
     for symbol, (features, prices) in stock_data.items():
         try:
             signal = generate_signal(func, features)
-            result = backtest_single_stock(signal, prices, symbol, min_hold, max_hold, cost_pct)
+
+            # Get Nifty regime filter
+            regime = get_nifty_regime(features) if use_regime_filter else None
+
+            result = backtest_single_stock(
+                signal, prices, symbol,
+                min_hold, max_hold, cost_pct,
+                regime=regime,
+            )
             results[symbol] = result
         except Exception:
             pass

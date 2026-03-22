@@ -430,7 +430,7 @@ def _evolution_loop(
                     logger.warning(f"  [WARN][?]  Seed failed: {exc}")
 
     # -- Early stopping -------------------------------------------------
-    early_stopper = EarlyStopping(patience=5, min_delta=0.01)
+    early_stopper = EarlyStopping(patience=GP_EARLY_STOP, min_delta=0.01)
     for row in gen_stats:
         early_stopper.update(row["best"], row["gen"])
 

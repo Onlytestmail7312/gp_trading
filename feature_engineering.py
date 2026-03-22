@@ -11,7 +11,7 @@ from config import DAILY_FEATURES
 log = get_logger()
 
 
-def resample_to_daily(df: pd.DataFrame) -> pd.DataFrame:
+def resample_to_daily(df: pd.DataFrame, require_volume: bool = True) -> pd.DataFrame:
     df2 = df.copy()
     if df2.index.tz is not None:
         df2.index = df2.index.normalize()
@@ -23,7 +23,10 @@ def resample_to_daily(df: pd.DataFrame) -> pd.DataFrame:
         "volume": "sum",
     })
     daily = daily.dropna(subset=["close"])
-    daily = daily[daily["volume"] > 0].copy()
+    if require_volume:
+        daily = daily[daily["volume"] > 0].copy()
+    else:
+        daily = daily[daily["close"] > 0].copy()
     return daily
 
 
@@ -131,17 +134,30 @@ def build_daily_features(
     nifty_close = None
     if nifty_1m is not None:
         # Resample nifty to daily
-        nifty_daily = resample_to_daily(nifty_1m)
+        nifty_daily = resample_to_daily(nifty_1m, require_volume=False)
 
-        # Align using plain date strings to avoid tz mismatch
+        # Convert both indexes to plain date strings for alignment
         nc = nifty_daily["close"].copy()
-        nc.index = pd.to_datetime([str(x)[:10] for x in nc.index])
 
-        stock_dates = pd.to_datetime([str(x)[:10] for x in daily.index])
+        # Build a simple dict: date_string -> close_price
+        nifty_dict = {str(idx)[:10]: val for idx, val in nc.items()}
 
-        nc_aligned = nc.reindex(stock_dates, method="ffill").bfill()
-        nc_aligned.index = daily.index
-        nifty_close = nc_aligned
+        # Map stock dates to nifty prices
+        aligned_values = []
+        for idx in daily.index:
+            date_str = str(idx)[:10]
+            aligned_values.append(nifty_dict.get(date_str, np.nan))
+
+        nc_aligned = pd.Series(aligned_values, index=daily.index)
+
+        # Forward fill then backward fill missing values
+        nc_aligned = nc_aligned.ffill().bfill()
+
+        matched = (~nc_aligned.isna()).sum()
+        log.info(f"  {symbol}: nifty matched {matched}/{len(daily)} dates")
+
+        if matched > 0:
+            nifty_close = nc_aligned
 
     feat_df = compute_daily_features(daily, nifty_close, symbol)
     feat_df["symbol"] = symbol

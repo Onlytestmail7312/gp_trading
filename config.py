@@ -59,6 +59,13 @@ DAILY_FEATURES = [
     "bb_pct",
     # Volume
     "volume_rel_20",
+    # Market (Nifty)
+    "nifty_ret_5d",
+    "nifty_ret_20d",
+    "nifty_vs_sma50",
+    # Relative strength vs Nifty
+    "rs_5d",
+    "rs_20d",
 ]
 
 N_FEATURES = len(DAILY_FEATURES)
@@ -84,17 +91,17 @@ TOTAL_COST_PCT  = COMMISSION_PCT + SLIPPAGE_PCT
 # ============================================================================
 # GP PARAMETERS
 # ============================================================================
-GP_POPULATION    = 2000
+GP_POPULATION    = 3000
 GP_GENERATIONS   = 50
-GP_CROSSOVER     = 0.7
-GP_MUTATION      = 0.2
-GP_ELITE         = 10
-GP_TOURNAMENT    = 5
+GP_CROSSOVER     = 0.75
+GP_MUTATION      = 0.15
+GP_ELITE         = 20
+GP_TOURNAMENT    = 7
 GP_MIN_DEPTH     = 2
-GP_MAX_DEPTH     = 6
-GP_MAX_NODES     = 40
-GP_EARLY_STOP    = 15
-GP_CHUNK_SIZE    = 200
+GP_MAX_DEPTH     = 8
+GP_MAX_NODES     = 50
+GP_EARLY_STOP    = 20
+GP_CHUNK_SIZE    = 300
 GP_WORKERS       = 8
 
 # ============================================================================
