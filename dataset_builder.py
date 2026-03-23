@@ -67,9 +67,21 @@ def build_full_feature_dataset(
 
 
 def split_dataset(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    train = df[df.index <= TRAIN_END].copy()
-    val   = df[(df.index >= VAL_START) & (df.index < VAL_END)].copy()
-    test  = df[df.index >= TEST_START].copy()
+    import pandas as pd
+    # Handle both tz-aware and tz-naive indexes
+    if df.index.tz is not None:
+        t_end   = pd.Timestamp(TRAIN_END, tz=df.index.tz)
+        v_start = pd.Timestamp(VAL_START, tz=df.index.tz)
+        v_end   = pd.Timestamp(VAL_END,   tz=df.index.tz)
+        t_start = pd.Timestamp(TEST_START, tz=df.index.tz)
+    else:
+        t_end   = pd.Timestamp(TRAIN_END)
+        v_start = pd.Timestamp(VAL_START)
+        v_end   = pd.Timestamp(VAL_END)
+        t_start = pd.Timestamp(TEST_START)
+    train = df[df.index <= t_end].copy()
+    val   = df[(df.index >= v_start) & (df.index < v_end)].copy()
+    test  = df[df.index >= t_start].copy()
 
     log.info(f"Train: {len(train):,} rows  ({train.index.min().date()} to {train.index.max().date()})")
     log.info(f"Val  : {len(val):,} rows  ({val.index.min().date()} to {val.index.max().date()})")
@@ -87,7 +99,7 @@ def prepare_stock_data(
 
     result = {}
     for sym in symbols:
-        sym_df = df[df["symbol"] == sym].sort_index()
+        sym_df = df[df["symbol"].astype(str) == str(sym)].sort_index()
         if len(sym_df) < 50:
             log.warning(f"  {sym}: only {len(sym_df)} rows -- skipping")
             continue

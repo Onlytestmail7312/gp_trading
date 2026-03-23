@@ -37,7 +37,7 @@ def single_stock_fitness(result: BacktestResult, tree_size: int) -> float:
 
     # Linear parsimony pressure (Koza 1992)
     # AdjustedFitness = RawFitness - (lambda * TreeSize)
-    LAMBDA_PARSIMONY = 0.05
+    LAMBDA_PARSIMONY = 0.02
     complexity = LAMBDA_PARSIMONY * tree_size
 
     fitness = (
