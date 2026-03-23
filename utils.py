@@ -54,6 +54,7 @@ def get_logger(name: str = "gp_system") -> logging.Logger:
 
     logger = logging.getLogger(name)
     logger.setLevel(logging.DEBUG)
+    logger.propagate = False
     # Prevent duplicate handlers if logger already exists
     if logger.handlers:
         _loggers[name] = logger

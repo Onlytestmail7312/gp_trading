@@ -30,7 +30,7 @@ BARS_PER_DAY   = 375   # 1-minute bars per trading day
 # ============================================================================
 # TIME SPLITS
 # ============================================================================
-TRAIN_START = "2015-01-01"
+TRAIN_START = "2019-01-01"
 TRAIN_END   = "2022-12-31"
 VAL_START   = "2023-01-01"
 VAL_END     = "2023-12-31"
@@ -40,33 +40,22 @@ TEST_START  = "2024-01-01"
 # DAILY FEATURE LIST  (GP terminals)
 # ============================================================================
 DAILY_FEATURES = [
-    # Returns
-    "ret_1d", "ret_3d", "ret_5d", "ret_10d", "ret_20d",
-    # SMA ratios
-    "close_vs_sma5", "close_vs_sma10", "close_vs_sma20",
-    "close_vs_sma50", "close_vs_sma200",
-    # MACD
-    "macd",
-    # RSI
-    "rsi_7", "rsi_14", "rsi_21",
-    # Bollinger Bands
-    "bb_upper_20", "bb_lower_20", "bb_width_20", "bb_pos_20",
-    # ATR
-    "atr_pct_7", "atr_pct_14",
-    # Volume
-    "vol_ratio", "vol_ret",
-    # Momentum
-    "mom_5", "mom_10", "mom_20",
-    # High/Low
-    "pct_from_high20", "pct_from_low20",
-    "pct_from_high52w", "pct_from_low52w",
-    # Candle
-    "body", "upper_wick", "lower_wick",
-    # Volatility
-    "vol_20d", "vol_60d",
-    # Nifty
-    "nifty_ret_1d", "nifty_ret_5d", "nifty_ret_20d",
-    "nifty_vs_sma20", "nifty_rsi14", "rel_strength",
+    "vol_60d",
+    "nifty_rsi14",
+    "pct_from_high52w",
+    "nifty_ret_20d",
+    "nifty_ret_5d",
+    "rel_strength",
+    "vol_20d",
+    "pct_from_low52w",
+    "rsi_7",
+    "close_vs_sma200",
+    "bb_width_20",
+    "atr_pct_7",
+    "ret_20d",
+    "ret_5d",
+    "bb_upper_20",
+    "upper_wick",
 ]
 
 N_FEATURES = len(DAILY_FEATURES)
@@ -94,16 +83,16 @@ TOTAL_COST_PCT  = COMMISSION_PCT + SLIPPAGE_PCT
 # ============================================================================
 # GP PARAMETERS
 # ============================================================================
-GP_POPULATION    = 8000
+GP_POPULATION    = 5000
 GP_GENERATIONS   = 100
-GP_CROSSOVER     = 0.75
-GP_MUTATION      = 0.15
-GP_ELITE         = 50
-GP_TOURNAMENT    = 7
+GP_CROSSOVER     = 0.70
+GP_MUTATION      = 0.25
+GP_ELITE         = 30
+GP_TOURNAMENT    = 4
 GP_MIN_DEPTH     = 2
-GP_MAX_DEPTH     = 7
-GP_MAX_NODES     = 40
-GP_EARLY_STOP    = 30
+GP_MAX_DEPTH     = 5
+GP_MAX_NODES     = 20
+GP_EARLY_STOP    = 25
 GP_CHUNK_SIZE    = 350
 GP_WORKERS       = 8
 
@@ -117,7 +106,7 @@ W_WIN_RATE        = 1.0
 W_MAX_DRAWDOWN    = 2.0
 W_TRADE_COUNT     = 0.5
 W_CONSISTENCY     = 1.5
-COMPLEXITY_PENALTY = 0.1
+COMPLEXITY_PENALTY = 0.05
 
 MIN_TRADES_TOTAL     = 10
 MIN_TRADES_PER_STOCK = 2

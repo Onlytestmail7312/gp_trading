@@ -35,7 +35,10 @@ def single_stock_fitness(result: BacktestResult, tree_size: int) -> float:
     else:
         trade_bonus = -0.5
 
-    complexity = COMPLEXITY_PENALTY * (tree_size / GP_MAX_NODES) ** 2
+    # Linear parsimony pressure (Koza 1992)
+    # AdjustedFitness = RawFitness - (lambda * TreeSize)
+    LAMBDA_PARSIMONY = 0.05
+    complexity = LAMBDA_PARSIMONY * tree_size
 
     fitness = (
         W_ANNUAL_RETURN * ann_ret
