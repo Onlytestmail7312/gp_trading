@@ -125,6 +125,7 @@ def validate_config():
     assert len(DAILY_FEATURES) > 0
     assert len(REGIMES) > 0
     assert GP_MIN_DEPTH < GP_MAX_DEPTH
-    print("  [OK] V8 config validation passed")
 
-validate_config()
+import os as _os
+if _os.environ.get("WORKER_PROCESS") != "1":
+    validate_config()

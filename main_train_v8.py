@@ -26,6 +26,7 @@ import multiprocessing as mp
 from pathlib import Path
 from typing import Dict
 import dill
+import dill as _dill
 
 # =============================================================================
 # SETUP
@@ -118,11 +119,13 @@ def run_regime_evolution(
         with mp.Pool(
             processes=GP_WORKERS,
             initializer=init_worker,
-            initargs=(toolbox, train_data, val_data, regime),
+            initargs=(None, train_data, val_data, regime),
         ) as pool:
+            # Serialize individuals with dill
+            invalid_dill = [dill.dumps(ind) for ind in invalid]
             chunks = [
-                invalid[i:i+GP_CHUNK_SIZE]
-                for i in range(0, len(invalid), GP_CHUNK_SIZE)
+                invalid_dill[i:i+GP_CHUNK_SIZE]
+                for i in range(0, len(invalid_dill), GP_CHUNK_SIZE)
             ]
             evaluated = []
             for ci, chunk in enumerate(chunks, 1):
@@ -136,8 +139,8 @@ def run_regime_evolution(
                          f"ETA: {fmt_seconds(remaining)}")
 
         # Update fitness
-        for ind, ev in zip(invalid, evaluated):
-            ind.fitness.values = ev.fitness.values
+        for ind, fit_vals in zip(invalid, evaluated):
+            ind.fitness.values = fit_vals
 
         # Update hall of fame
         hall_of_fame.update(population)

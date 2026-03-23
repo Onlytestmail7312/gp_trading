@@ -2,51 +2,64 @@
 fitness_v8.py
 =============
 Regime-aware fitness function for V8 GP evolution.
-
-Key differences from V7:
-    - Evaluated on regime-specific data only
-    - Linear parsimony pressure
-    - Overfit guard: train vs val consistency
-    - Regime-specific trade frequency targets
+Uses dill for multiprocessing serialization.
+Toolbox initialized inside each worker process.
 """
 
 import numpy as np
-from typing import Dict, Tuple
-from dataclasses import dataclass
+from typing import Dict
+import dill
 
 from backtester import backtest_portfolio, BacktestResult
 from config_v8 import (
     W_ANNUAL_RETURN, W_SHARPE, W_SORTINO, W_WIN_RATE,
     W_MAX_DRAWDOWN, W_TRADE_COUNT, W_CONSISTENCY,
-    LAMBDA_PARSIMONY, MIN_TRADES_TOTAL, MIN_TRADES_PER_STOCK,
-    EPSILON,
+    LAMBDA_PARSIMONY, MIN_TRADES_PER_STOCK,
+    EPSILON, DAILY_FEATURES,
 )
 
 # =============================================================================
 # REGIME-SPECIFIC TRADE FREQUENCY TARGETS
 # =============================================================================
-# Each regime has different expected trade frequency
 REGIME_TRADE_TARGETS = {
-    'BULL_QUIET':    (4,  30),   # min 4, max 30 trades/year
-    'SIDEWAYS_BEAR': (4,  25),   # fewer trades in sideways
-    'VOLATILE':      (6,  40),   # more trades in volatile
+    'BULL_QUIET':    (4,  30),
+    'SIDEWAYS_BEAR': (4,  25),
+    'VOLATILE':      (6,  40),
 }
-
 DEFAULT_TRADE_TARGET = (4, 35)
+
+# =============================================================================
+# GLOBAL WORKER STATE
+# =============================================================================
+_WORKER_STATE = {}
+
+
+def init_worker(pset_dill, train_data, val_data, regime):
+    """Initialize worker with dill-serialized pset."""
+    import os
+    os.environ["WORKER_PROCESS"] = "1"
+    global _WORKER_STATE
+    import dill as _dill
+    from deap import gp, creator, base, tools
+    from gp_individual import setup_gp_toolbox
+
+    # Rebuild toolbox inside worker
+    toolbox, pset = setup_gp_toolbox(DAILY_FEATURES)
+
+    _WORKER_STATE['toolbox']     = toolbox
+    _WORKER_STATE['train_data']  = train_data
+    _WORKER_STATE['val_data']    = val_data
+    _WORKER_STATE['regime']      = regime
+
 
 # =============================================================================
 # SINGLE STOCK FITNESS
 # =============================================================================
 def single_stock_fitness(
-    result:  BacktestResult,
+    result:    BacktestResult,
     tree_size: int,
-    regime:  str = 'BULL_QUIET',
+    regime:    str = 'BULL_QUIET',
 ) -> float:
-    """
-    Compute fitness for a single stock backtest result.
-    Regime-aware trade frequency targets.
-    """
-    # Minimum trades gate
     if result.n_trades < MIN_TRADES_PER_STOCK:
         return -50.0
 
@@ -56,19 +69,17 @@ def single_stock_fitness(
     win_rate = result.win_rate / 100.0
     max_dd   = abs(result.max_drawdown_pct) / 100.0
 
-    # Regime-specific trade frequency bonus
     min_trades, max_trades = REGIME_TRADE_TARGETS.get(
         regime, DEFAULT_TRADE_TARGET
     )
     tpy = result.trades_per_year
     if tpy < min_trades:
-        trade_bonus = -1.0       # too few trades
+        trade_bonus = -1.0
     elif tpy <= max_trades:
-        trade_bonus = 0.5        # ideal range
+        trade_bonus = 0.5
     else:
-        trade_bonus = -0.5       # too many trades = overtrading
+        trade_bonus = -0.5
 
-    # Linear parsimony
     complexity = LAMBDA_PARSIMONY * tree_size
 
     fitness = (
@@ -80,7 +91,6 @@ def single_stock_fitness(
         + W_TRADE_COUNT  * trade_bonus
         - complexity
     )
-
     return float(fitness)
 
 
@@ -92,10 +102,6 @@ def portfolio_fitness(
     tree_size: int,
     regime:    str = 'BULL_QUIET',
 ) -> float:
-    """
-    Aggregate per-stock fitness into portfolio fitness.
-    Penalizes inconsistency across stocks.
-    """
     if not results:
         return -50.0
 
@@ -112,14 +118,11 @@ def portfolio_fitness(
     mean_fit = np.mean(valid)
     std_fit  = np.std(valid)
 
-    # Penalize inconsistency across stocks
-    portfolio_fit = mean_fit - W_CONSISTENCY * std_fit
-
-    return float(portfolio_fit)
+    return float(mean_fit - W_CONSISTENCY * std_fit)
 
 
 # =============================================================================
-# REGIME-AWARE FULL FITNESS
+# FULL EVALUATION
 # =============================================================================
 def evaluate_individual(
     func,
@@ -128,92 +131,57 @@ def evaluate_individual(
     tree_size:  int,
     regime:     str,
 ) -> float:
-    """
-    Full fitness evaluation for one individual.
-
-    Steps:
-        1. Backtest on train data
-        2. Backtest on val data
-        3. Compute train + val fitness
-        4. Apply overfit penalty
-        5. Return final fitness
-    """
-    # --- Train fitness ---
+    # Train fitness
     train_results = backtest_portfolio(func, train_data)
     train_fit     = portfolio_fitness(train_results, tree_size, regime)
 
-    # Early exit if train is terrible
     if train_fit <= -40.0:
         return -50.0
 
-    # --- Val fitness ---
+    # Val fitness
     val_results = backtest_portfolio(func, val_data)
     val_fit     = portfolio_fitness(val_results, tree_size, regime)
 
-    # --- Overfit guard ---
-    overfit_penalty = 1.0   # default: no penalty
-
+    # Overfit guard
+    overfit_penalty = 1.0
     if train_fit > EPSILON:
         if val_fit <= 0:
-            # Loses money on val -- strong overfit signal
             overfit_penalty = 0.1
         else:
             consistency = val_fit / (train_fit + EPSILON)
             if consistency >= 0.8:
-                overfit_penalty = 1.0    # great generalization
+                overfit_penalty = 1.0
             elif consistency >= 0.5:
-                overfit_penalty = 0.8    # acceptable
+                overfit_penalty = 0.8
             elif consistency >= 0.2:
-                overfit_penalty = 0.5    # weak generalization
+                overfit_penalty = 0.5
             else:
-                overfit_penalty = 0.2    # poor generalization
+                overfit_penalty = 0.2
     else:
-        # Train itself is bad
         overfit_penalty = 0.5
 
-    # --- Final fitness ---
-    # Weight val more than train (60/40)
     final_fit = (0.4 * train_fit + 0.6 * val_fit) * overfit_penalty
-
     return float(final_fit)
 
 
 # =============================================================================
-# MULTIPROCESSING WORKER
+# WORKER FUNCTION
 # =============================================================================
-# Global state for workers
-_GLOBAL_TOOLBOX     = None
-_GLOBAL_TRAIN_DATA  = None
-_GLOBAL_VAL_DATA    = None
-_GLOBAL_REGIME      = None
-
-
-def init_worker(toolbox, train_data, val_data, regime):
-    """Initialize worker process with shared data."""
-    global _GLOBAL_TOOLBOX, _GLOBAL_TRAIN_DATA
-    global _GLOBAL_VAL_DATA, _GLOBAL_REGIME
-    _GLOBAL_TOOLBOX    = toolbox
-    _GLOBAL_TRAIN_DATA = train_data
-    _GLOBAL_VAL_DATA   = val_data
-    _GLOBAL_REGIME     = regime
-
-
-def evaluate_worker(individual):
-    """Worker function for multiprocessing evaluation."""
-    global _GLOBAL_TOOLBOX, _GLOBAL_TRAIN_DATA
-    global _GLOBAL_VAL_DATA, _GLOBAL_REGIME
-
+def evaluate_worker(ind_dill):
+    """Worker function — receives dill-serialized individual."""
+    global _WORKER_STATE
     try:
-        func = _GLOBAL_TOOLBOX.compile(expr=individual)
-        fit  = evaluate_individual(
-            func,
-            _GLOBAL_TRAIN_DATA,
-            _GLOBAL_VAL_DATA,
-            len(individual),
-            _GLOBAL_REGIME,
-        )
-        individual.fitness.values = (fit,)
-    except Exception:
-        individual.fitness.values = (-50.0,)
+        individual = dill.loads(ind_dill)
+        toolbox    = _WORKER_STATE['toolbox']
+        train_data = _WORKER_STATE['train_data']
+        val_data   = _WORKER_STATE['val_data']
+        regime     = _WORKER_STATE['regime']
 
-    return individual
+        func = toolbox.compile(expr=individual)
+        fit  = evaluate_individual(
+            func, train_data, val_data,
+            len(individual), regime,
+        )
+        return (fit,)
+    except Exception:
+        return (-50.0,)

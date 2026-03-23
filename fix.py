@@ -1,19 +1,28 @@
-import pandas as pd
+content = open('config_v8.py', encoding='utf-8').read()
 
-df = pd.read_parquet('gp_output/gp_features_daily2.parquet')
-print('Before - symbol dtype:', df['symbol'].dtype)
+# Simply remove the print statement from validate_config
+old = '''import os as _os
+if _os.environ.get("WORKER_PROCESS") != "1":
+    validate_config()
+    print("  [OK] V8 config validation passed")'''
 
-# Convert ArrowStringArray to regular string
-df['symbol'] = df['symbol'].astype(str)
-print('After  - symbol dtype:', df['symbol'].dtype)
+new = '''import os as _os
+if _os.environ.get("WORKER_PROCESS") != "1":
+    validate_config()'''
 
-# Verify
-print('Sample:', df['symbol'].unique())
-
-# Save back
-df.to_parquet('gp_output/gp_features_daily2.parquet', index=True)
-print('Saved with regular string dtype')
-
-# Verify filter works
-test = df[df['symbol'] == 'ICICIBANK']
-print('ICICIBANK rows:', len(test))
+if old in content:
+    content = content.replace(old, new)
+    open('config_v8.py', 'w', encoding='utf-8').write(content)
+    print('Fixed - removed print from workers')
+else:
+    # Try simpler approach - just suppress all prints in validate
+    old2 = 'validate_config()\n    print("  [OK] V8 config validation passed")'
+    new2 = 'validate_config()'
+    if old2 in content:
+        content = content.replace(old2, new2)
+        open('config_v8.py', 'w', encoding='utf-8').write(content)
+        print('Fixed v2')
+    else:
+        print('NOT FOUND - check config_v8.py manually')
+        idx = content.find('validate_config')
+        print(repr(content[idx:idx+300]))
